@@ -233,7 +233,7 @@ Goal: typed configuration loaded and validated from file, env, and flags.
 
 Goal: logging and both storage engines open, migrate, and close cleanly.
 
-- [ ] **M2.1 — Structured logging** — *deps: M1.1*
+- [x] **M2.1 — Structured logging** — *deps: M1.1*
   Add `internal/logging/logging.go`: build a `*slog.Logger` from the configured
   log level, with a component helper and secret-redaction guidance (SPEC §23).
   *Tests first:* level parsing, handler selection, `With("component", …)` helper.
