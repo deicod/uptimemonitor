@@ -275,7 +275,7 @@ Goal: logging and both storage engines open, migrate, and close cleanly.
 Goal: the service starts, exposes `/v1/status` over a Unix socket, shuts down
 gracefully, and the TUI command can connect.
 
-- [ ] **M3.1 — IPC contract types & errors** — *deps: M2.1*
+- [x] **M3.1 — IPC contract types & errors** — *deps: M2.1*
   Add `internal/ipc/types.go` (request/response DTOs — at minimum the status
   response) and `internal/ipc/errors.go` (error codes from SPEC §10.3, JSON
   envelope encode/decode helpers).
