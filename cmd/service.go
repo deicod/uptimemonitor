@@ -19,7 +19,7 @@ The service owns persistence, scheduling, probe execution, monitor state,
 incidents, notification delivery, and the local IPC server that the TUI
 connects to.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Fprintln(cmd.OutOrStdout(), "service called")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "service called")
 	},
 }
 

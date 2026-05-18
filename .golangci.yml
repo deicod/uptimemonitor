@@ -1,0 +1,29 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+    - bodyclose
+    - unconvert
+  settings:
+    revive:
+      rules:
+        # The Cobra scaffold carries a copyright block above each `package`
+        # clause and unused `args` parameters; don't flag those.
+        - name: package-comments
+          disabled: true
+        - name: unused-parameter
+          disabled: true
+
+run:
+  timeout: 5m
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -19,7 +19,7 @@ The TUI is a client that connects to a running service over its local Unix
 socket and manages monitors, incidents, and notification targets. All reads
 and writes go through the service; the TUI never touches storage directly.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Fprintln(cmd.OutOrStdout(), "tui called")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "tui called")
 	},
 }
 

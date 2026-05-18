@@ -164,7 +164,7 @@ tooling is in place.
   --version`.
   *Context:* SPEC §5 (version package), §7.1.
 
-- [ ] **M0.3 — Build & quality tooling** — *deps: M0.2*
+- [x] **M0.3 — Build & quality tooling** — *deps: M0.2*
   Add a `Makefile` with `build`, `test`, `vet`, `fmt`, `lint`, `tidy`,
   `migrate-new`, `migrate-lint`, `migrate-apply`, and `ko-build` targets (SPEC
   §13.3, §25); `build` injects version ldflags. Add `.gitignore`, `.golangci.yml`,

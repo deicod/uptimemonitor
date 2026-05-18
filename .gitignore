@@ -1,0 +1,19 @@
+# Build artifacts
+/bin/
+*.exe
+
+# Test and coverage output
+*.out
+coverage.*
+
+# Local runtime data and config
+/data/
+*.db
+*.db-wal
+*.db-shm
+config.local.yaml
+
+# Editor and OS noise
+.idea/
+.vscode/
+.DS_Store
