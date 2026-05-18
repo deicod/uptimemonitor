@@ -239,7 +239,7 @@ Goal: logging and both storage engines open, migrate, and close cleanly.
   *Tests first:* level parsing, handler selection, `With("component", …)` helper.
   *Context:* SPEC §23; §6 decision 12.
 
-- [ ] **M2.2 — SQLite store: open & pragmas** — *deps: M1.1*
+- [x] **M2.2 — SQLite store: open & pragmas** — *deps: M1.1*
   Add `internal/store/sqlite/store.go` (open via `modernc.org/sqlite`, apply
   pragmas from SPEC §12.4, expose the handle, `Close()`) and
   `internal/store/sqlite/schema.sql` containing the SPEC §12.3 schema as the
