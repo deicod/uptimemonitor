@@ -1,0 +1,23 @@
+data_dir: /var/lib/uptimemonitor
+runtime_dir: /run/uptimemonitor
+sqlite_path: /var/lib/uptimemonitor/config.db
+tsdb_path: /var/lib/uptimemonitor/tsdb
+socket_path: /run/uptimemonitor/uptimemonitor.sock
+log_level: info
+secret: ""
+
+service:
+  check_workers: 16
+  default_interval: 60s
+  timeout: 10s
+  shutdown_timeout: 10s
+
+retention:
+  raw_samples: 30d
+  aggregated_history: 365d
+
+notifications:
+  enabled: true
+  max_attempts: 3
+  initial_retry_delay: 5s
+  max_retry_delay: 60s

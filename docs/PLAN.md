@@ -194,7 +194,7 @@ tooling is in place.
 
 Goal: typed configuration loaded and validated from file, env, and flags.
 
-- [ ] **M1.1 — Config structs & duration decoding** — *deps: M0.2*
+- [x] **M1.1 — Config structs & duration decoding** — *deps: M0.2*
   Define `Config`, `ServiceConfig`, `RetentionConfig`, `NotificationConfig` in
   `internal/config/config.go` (SPEC §8.2). Add a mapstructure decode hook that
   accepts human durations including the `d`/`w` suffixes used by
