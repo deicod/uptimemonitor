@@ -290,7 +290,7 @@ gracefully, and the TUI command can connect.
   socket; unknown route → `not_found` envelope; shutdown removes the socket.
   *Context:* SPEC §10.1, §10.3–10.4, §20.3, §9.3.
 
-- [ ] **M3.3 — IPC client** — *deps: M3.1*
+- [x] **M3.3 — IPC client** — *deps: M3.1*
   Add `internal/ipc/client.go`: an HTTP client dialing the Unix socket, a typed
   request helper, error-envelope decoding into Go errors, and a friendly
   connection-failure error when the socket is missing.

@@ -7,4 +7,3 @@
 // encoding utilities are in types.go and errors.go. Client implementation will
 // be added in a subsequent milestone (M3.3).
 package ipc
-
