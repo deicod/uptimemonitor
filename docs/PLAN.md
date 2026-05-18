@@ -173,7 +173,7 @@ tooling is in place.
   clean.
   *Context:* SPEC §13.3, §25; §6 (decisions).
 
-- [ ] **M0.4 — README & contributor docs** — *deps: M0.3*
+- [x] **M0.4 — README & contributor docs** — *deps: M0.3*
   Write `README.md` (summary, build/run, links to PRD/SPEC/PLAN); confirm
   `LICENSE` is MIT; add a short `CONTRIBUTING.md`.
   *Tests first:* n/a — verify links resolve.
