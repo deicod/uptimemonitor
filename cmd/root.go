@@ -27,6 +27,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/deicod/uptimemonitor/internal/version"
 )
 
 var cfgFile string
@@ -41,6 +43,7 @@ endpoints, tracks their state and incidents, and delivers notifications.
 It runs as a long-lived service that owns persistence, scheduling, and
 notification delivery, and ships with a Bubble Tea terminal UI client that
 manages monitors over a local Unix socket.`,
+	Version: version.String(),
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

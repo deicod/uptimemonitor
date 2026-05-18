@@ -156,7 +156,7 @@ tooling is in place.
   `tui` and that both subcommands run.
   *Context:* SPEC §6, §7; `cmd/*.go`, `main.go`.
 
-- [ ] **M0.2 — Version package & `--version`** — *deps: M0.1*
+- [x] **M0.2 — Version package & `--version`** — *deps: M0.1*
   Add `internal/version/version.go` (`Version`, `Commit`, `Date` vars defaulting
   to `"dev"`, plus a `String()` helper); wire a `--version` output into the root
   command, populated via `-ldflags -X`.
