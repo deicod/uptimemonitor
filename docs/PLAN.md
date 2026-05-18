@@ -186,7 +186,7 @@ tooling is in place.
   *Tests first:* n/a — verify the workflow passes on the current tree.
   *Context:* SPEC §25.
 
-- [ ] **M0.6 — M0 exit check** — *deps: M0.1–M0.5*
+- [x] **M0.6 — M0 exit check** — *deps: M0.1–M0.5*
   Verify: repo builds; `--help`/`--version` correct; `make test`/`make vet`
   green; CI green. Mark all M0 tasks complete.
 
