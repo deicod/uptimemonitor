@@ -259,7 +259,7 @@ Goal: logging and both storage engines open, migrate, and close cleanly.
   a broken migration → error returned.
   *Context:* SPEC §12.3, §13; §6 decision 13.
 
-- [ ] **M2.4 — Prometheus TSDB store: open & close** — *deps: M1.1*
+- [x] **M2.4 — Prometheus TSDB store: open & close** — *deps: M1.1*
   Add `internal/store/tsdb/store.go`: open the Prometheus `tsdb.DB` at
   `tsdb_path` with retention from config, expose appender/querier accessors and
   `Close()`.
