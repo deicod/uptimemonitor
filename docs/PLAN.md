@@ -203,7 +203,7 @@ Goal: typed configuration loaded and validated from file, env, and flags.
   invalid input); struct decode from a YAML fixture.
   *Context:* SPEC §8.1–8.2; §6 decision 11.
 
-- [ ] **M1.2 — Config loading (file, env, flags, defaults)** — *deps: M1.1*
+- [x] **M1.2 — Config loading (file, env, flags, defaults)** — *deps: M1.1*
   Implement `Load(...)` in `internal/config`: Viper with the `UPTIMEMONITOR_` env
   prefix, all defaults (SPEC §8.3), config-file discovery
   (`/etc/uptimemonitor/config.yaml`), and binding for `--config`, `--log-level`,
