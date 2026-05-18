@@ -212,7 +212,7 @@ Goal: typed configuration loaded and validated from file, env, and flags.
   env; explicit `--config` honoured.
   *Context:* SPEC §8.1, §8.3, §8.4; §7.1–7.2.
 
-- [ ] **M1.3 — Config validation** — *deps: M1.1*
+- [x] **M1.3 — Config validation** — *deps: M1.1*
   Implement every SPEC §8.5 failure rule in `internal/config/validate.go`;
   return field-aware errors.
   *Tests first:* table-driven, one case per rule plus a valid baseline.
