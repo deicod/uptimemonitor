@@ -179,7 +179,7 @@ tooling is in place.
   *Tests first:* n/a — verify links resolve.
   *Context:* PRD §1–2, §7; SPEC §5.
 
-- [ ] **M0.5 — CI pipeline** — *deps: M0.3*
+- [x] **M0.5 — CI pipeline** — *deps: M0.3*
   Add `.github/workflows/ci.yml` running `go build ./...`, `go vet ./...`,
   `go test ./...`, and a `gofmt` check. (An `atlas migrate lint` step is added in
   M2 once migrations exist.)
