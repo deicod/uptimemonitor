@@ -21,6 +21,14 @@ jobs:
         with:
           go-version: '1.26.3'
 
+      - name: Set up Atlas
+        uses: ariga/setup-atlas@v0
+        with:
+          version: latest
+
+      - name: Atlas migrate validate
+        run: atlas migrate validate --env local
+
       - name: gofmt
         run: |
           diff=$(gofmt -l .)

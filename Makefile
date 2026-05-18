@@ -18,7 +18,7 @@ MIGRATIONS_DIR := internal/store/sqlite/migrations
 NAME ?=
 
 .PHONY: all build test vet fmt lint tidy \
-        migrate-new migrate-lint migrate-apply ko-build clean help
+        migrate-new migrate-validate migrate-apply ko-build clean help
 
 all: build
 
@@ -51,9 +51,9 @@ migrate-new:
 	@test -n "$(NAME)" || { echo "NAME is required, e.g. make migrate-new NAME=create_monitors"; exit 1; }
 	atlas migrate diff $(NAME) --env local
 
-## migrate-lint: lint the migration directory.
-migrate-lint:
-	atlas migrate lint --env local --latest 1
+## migrate-validate: validate migration checksum integrity.
+migrate-validate:
+	atlas migrate validate --env local
 
 ## migrate-apply: apply pending migrations to the local database.
 migrate-apply:

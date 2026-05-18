@@ -248,7 +248,7 @@ Goal: logging and both storage engines open, migrate, and close cleanly.
   close cleanly.
   *Context:* SPEC §12.1–12.4.
 
-- [ ] **M2.3 — Atlas migrations & startup applier** — *deps: M2.2*
+- [x] **M2.3 — Atlas migrations & startup applier** — *deps: M2.2*
   Generate the initial versioned migration into
   `internal/store/sqlite/migrations/` from `schema.sql` (`atlas migrate diff`);
   embed migrations with `embed.FS`; implement a `Migrate` function applied at
