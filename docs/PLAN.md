@@ -225,7 +225,7 @@ Goal: typed configuration loaded and validated from file, env, and flags.
   readable error; valid config → command proceeds.
   *Context:* SPEC §7; `internal/config`.
 
-- [ ] **M1.5 — M1 exit check** — *deps: M1.1–M1.4*
+- [x] **M1.5 — M1 exit check** — *deps: M1.1–M1.4*
   Verify config loads from file/env/flags with correct precedence and validation
   fails fast. Mark all M1 tasks complete.
 
