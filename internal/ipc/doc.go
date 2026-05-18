@@ -1,9 +1,10 @@
-// Package ipc owns the API contract types shared between the uptimemonitor
-// service and TUI. Request/response DTOs, error codes, and JSON envelope
-// helpers live here so that both sides depend on the same type definitions
-// (SPEC §10).
+// Package ipc owns the API contract types, server, and routing shared between
+// the uptimemonitor service and TUI. Request/response DTOs, error codes, JSON
+// envelope helpers, the Unix-socket HTTP server, and route wiring all live here
+// so that both sides depend on the same type definitions (SPEC §10).
 //
-// No transport logic lives in this file — it holds only data structures and
-// encoding utilities. Server and client implementations will be added in
-// subsequent milestones (M3.2, M3.3).
+// Server and route setup are in server.go and routes.go; data structures and
+// encoding utilities are in types.go and errors.go. Client implementation will
+// be added in a subsequent milestone (M3.3).
 package ipc
+

@@ -282,7 +282,7 @@ gracefully, and the TUI command can connect.
   *Tests first:* error envelope round-trips; error-code constants are stable.
   *Context:* SPEC §10.1–10.4.
 
-- [ ] **M3.2 — IPC server over Unix socket** — *deps: M3.1*
+- [x] **M3.2 — IPC server over Unix socket** — *deps: M3.1*
   Add `internal/ipc/server.go` and `routes.go`: an HTTP server bound to a Unix
   socket, `/v1` route prefix, JSON middleware, socket mode `0660`, stale-socket
   removal on start, and socket removal on stop.
