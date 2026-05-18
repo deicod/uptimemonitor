@@ -266,7 +266,7 @@ Goal: logging and both storage engines open, migrate, and close cleanly.
   *Tests first:* open a temp TSDB; append one sample; close and reopen.
   *Context:* SPEC §14.1–14.4.
 
-- [ ] **M2.5 — M2 exit check** — *deps: M2.1–M2.4*
+- [x] **M2.5 — M2 exit check** — *deps: M2.1–M2.4*
   Verify logging, SQLite (with migrations), and TSDB all open and close against
   temp directories. Mark all M2 tasks complete.
 
