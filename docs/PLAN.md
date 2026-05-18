@@ -218,7 +218,7 @@ Goal: typed configuration loaded and validated from file, env, and flags.
   *Tests first:* table-driven, one case per rule plus a valid baseline.
   *Context:* SPEC §8.5; `internal/config/config.go`.
 
-- [ ] **M1.4 — Wire config into commands** — *deps: M1.2, M1.3*
+- [x] **M1.4 — Wire config into commands** — *deps: M1.2, M1.3*
   Load and validate config in the root command's `PersistentPreRunE`, expose it
   to `service`/`tui`; remove the leftover scaffold `initConfig`.
   *Tests first:* command smoke tests — invalid config → non-zero exit with a

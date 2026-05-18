@@ -5,6 +5,8 @@ package cmd
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -91,5 +93,45 @@ func TestServiceCommandRuns(t *testing.T) {
 func TestTUICommandRuns(t *testing.T) {
 	if _, err := execute(t, "tui"); err != nil {
 		t.Fatalf("tui command returned error: %v", err)
+	}
+}
+
+// writeConfig writes content to a temp config.yaml and returns its path.
+func writeConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
+// TestInvalidConfigFailsFast verifies a config that violates a SPEC §8.5 rule
+// stops the command before its Run with a field-aware, readable error — the
+// operator must learn exactly which key to fix.
+func TestInvalidConfigFailsFast(t *testing.T) {
+	path := writeConfig(t, "service:\n  check_workers: 0\n")
+	out, err := execute(t, "service", "--config", path)
+	if err == nil {
+		t.Fatal("expected non-nil error for invalid config, got nil")
+	}
+	if !strings.Contains(err.Error(), "check_workers") {
+		t.Errorf("error %q does not name the offending field", err.Error())
+	}
+	if strings.Contains(out, "service called") {
+		t.Errorf("command Run executed despite invalid config:\n%s", out)
+	}
+}
+
+// TestValidConfigProceeds verifies a valid explicit --config lets the command
+// reach its Run.
+func TestValidConfigProceeds(t *testing.T) {
+	path := writeConfig(t, "log_level: debug\n")
+	out, err := execute(t, "service", "--config", path)
+	if err != nil {
+		t.Fatalf("service with valid config returned error: %v", err)
+	}
+	if !strings.Contains(out, "service called") {
+		t.Errorf("command Run did not execute:\n%s", out)
 	}
 }

@@ -22,16 +22,17 @@ THE SOFTWARE.
 package cmd
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
+	"github.com/deicod/uptimemonitor/internal/config"
 	"github.com/deicod/uptimemonitor/internal/version"
 )
 
-var cfgFile string
+// cfg holds the configuration loaded and validated in PersistentPreRunE. It is
+// populated before any subcommand's Run executes and read by service/tui.
+var cfg *config.Config
 
 // rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
@@ -44,6 +45,20 @@ It runs as a long-lived service that owns persistence, scheduling, and
 notification delivery, and ships with a Bubble Tea terminal UI client that
 manages monitors over a local Unix socket.`,
 	Version: version.String(),
+	// A config load/validation failure is not a usage error; silence the
+	// usage dump so the field-aware error stands on its own.
+	SilenceUsage: true,
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+		loaded, err := config.Load(cmd.Flags())
+		if err != nil {
+			return err
+		}
+		if err := config.Validate(loaded); err != nil {
+			return err
+		}
+		cfg = loaded
+		return nil
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -56,23 +71,11 @@ func Execute() {
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
-
-	// Persistent config flag, shared by all subcommands. Full configuration
-	// loading and validation is wired up in a later milestone (M1).
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "path to config file")
-}
-
-// initConfig reads in the config file and ENV variables if set. Config loading
-// is fleshed out in M1; for now it only honours an explicit --config path.
-func initConfig() {
-	if cfgFile != "" {
-		viper.SetConfigFile(cfgFile)
-	}
-
-	viper.AutomaticEnv() // read in environment variables that match
-
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
-	}
+	// Persistent flags shared by all subcommands. --config selects the config
+	// file; the rest override individual config keys (config.Load binds them).
+	pf := rootCmd.PersistentFlags()
+	pf.String("config", "", "path to config file")
+	pf.String("log-level", "", "log level: debug, info, warn, error")
+	pf.String("socket-path", "", "path to the IPC Unix socket")
+	pf.String("data-dir", "", "path to the data directory")
 }
