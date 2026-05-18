@@ -1,7 +1,7 @@
 # Uptime Monitor Technical Specification
 
 Status: Draft  
-Version: 0.1  
+Version: 0.2  
 Date: 2026-05-18  
 Repository: `github.com/deicod/uptimemonitor`  
 License: MIT  
@@ -38,7 +38,7 @@ The TUI is a client process. It owns presentation, keyboard interaction, local f
 
 ## 3. Technical decisions
 
-The following decisions are accepted for SPEC v0.1:
+The following decisions are accepted for this SPEC:
 
 - Language: Go.
 - Module path: `github.com/deicod/uptimemonitor`.
@@ -59,6 +59,8 @@ The following decisions are accepted for SPEC v0.1:
 - MVP access model: local single-user, no TUI login.
 - Future access boundary: configurable secret for future web UI/API.
 - Prometheus metrics export: excluded from MVP.
+- Entity IDs: ULID.
+- Development task runner: Make (`Makefile`).
 
 ## 4. Non-goals for this SPEC
 
@@ -97,6 +99,8 @@ Recommended initial layout:
 │   │   ├── routes.go
 │   │   ├── server.go
 │   │   └── types.go
+│   ├── logging/
+│   │   └── logging.go
 │   ├── monitor/
 │   │   ├── model.go
 │   │   ├── service.go
@@ -168,6 +172,7 @@ Rules:
 - `internal/ipc/` owns API contracts between service and TUI.
 - `internal/tui/` owns Bubble Tea models and screens.
 - `internal/notify/` owns notification delivery and provider registration.
+- `internal/logging/` owns `log/slog` logger construction.
 - No package outside `store` should contain raw SQL except migration files.
 - The TUI must not import `internal/store/*`.
 
@@ -333,6 +338,11 @@ type NotificationConfig struct {
     MaxRetryDelay     time.Duration `mapstructure:"max_retry_delay"`
 }
 ```
+
+Duration fields are decoded with a custom `mapstructure` decode hook registered
+with Viper before `Unmarshal`. Go's `time.ParseDuration` does not accept day or
+week suffixes, so values such as `raw_samples: 30d` and `aggregated_history: 365d`
+require the hook to translate `d` and `w` suffixes into a `time.Duration`.
 
 ### 8.3 Defaults
 
@@ -595,7 +605,7 @@ Partial update. The service validates the resulting monitor.
 DELETE /v1/monitors/{id}
 ```
 
-Deletion should be soft-delete in SQLite for MVP unless implementation simplicity strongly favors hard-delete. TSDB samples may remain until retention removes them.
+Deletion is soft-delete in SQLite for the MVP (SPEC v0.1 open question 2, now resolved): the row is retained with `deleted_at` set and hidden from default listings. TSDB samples remain until retention removes them.
 
 #### Trigger manual check
 
@@ -835,9 +845,10 @@ Prometheus TSDB is the source of truth for historical time-series samples.
 
 Use string IDs.
 
-Recommended: ULID or UUIDv7.
+Decision: entity IDs are ULIDs (SPEC v0.1 open question 1, now resolved). ULIDs
+are 26 characters, time-ordered, and lexically sortable.
 
-Requirement: IDs must be lexically sortable by creation time if practical.
+Requirement: IDs must be lexically sortable by creation time.
 
 ### 12.3 Schema draft
 
@@ -989,6 +1000,13 @@ On startup, the service should:
 3. Apply pending migrations.
 4. Fail startup on migration failure.
 
+Migrations are applied by the service itself, in process. Migration files are
+embedded into the binary with `embed.FS` and applied by an in-process applier, so
+the runtime has no dependency on the `atlas` binary; this is required because the
+ko-built container image (§22) is distroless. The `atlas` CLI is used only at
+development time — for `atlas migrate diff`, `atlas migrate lint`, and generating
+new migration files.
+
 ### 13.3 Development workflow
 
 Recommended scripts or make targets:
@@ -1056,8 +1074,11 @@ aggregated history: 365 days
 Implementation decision:
 
 - Raw samples live in Prometheus TSDB.
-- Aggregated history may be stored in SQLite or TSDB depending on implementation simplicity.
-- SPEC v0.1 recommends storing aggregated history in SQLite if needed for fast TUI ranges.
+- Aggregated history for MVP ranges is computed on demand by querying and
+  bucketing TSDB samples; there is no separate aggregated-history store (SPEC
+  v0.1 open question 3, now resolved).
+- A persisted aggregation store may be revisited post-MVP if on-demand queries
+  become too slow for the longer ranges.
 
 ### 14.5 History query ranges
 
@@ -1408,6 +1429,17 @@ retry if needed
 final status is recorded
 ```
 
+The "notification job" is held in an in-memory queue; MVP retry state is tracked
+through the `notification_attempts` table only, with no separate persistent job
+table (SPEC v0.1 open question 4, now resolved). In-flight jobs that have not
+completed at shutdown are flushed during graceful shutdown (§9.3); jobs are not
+durable across a crash in the MVP.
+
+Each job is delivered to every globally-enabled notification target; the MVP has
+no per-monitor target selection. Whether a monitor emits notifications at all is
+governed by the monitor's `notifications_enabled` flag together with the global
+`notifications.enabled` setting (SPEC v0.1 open question 5, now resolved).
+
 ### 18.7 Retry policy
 
 MVP defaults:
@@ -1539,10 +1571,11 @@ MVP requirements:
 - Secret is not required for TUI use.
 - Secret is not logged.
 
-Open implementation choice:
+Decision (SPEC v0.1 open question 7, now resolved):
 
-- Store direct secret value only in config/env.
-- Store a derived hash in SQLite only if future API work needs it.
+- For the MVP the secret is loaded only from config or environment; it is not
+  persisted, and no hash is stored in SQLite.
+- Storing a derived hash in SQLite may be revisited when web UI/API work begins.
 
 ### 20.3 IPC access
 
@@ -1633,12 +1666,11 @@ Recommended mount:
 
 Containers may not use `/run/uptimemonitor` the same way as systemd.
 
-Open decision:
+Decision (SPEC v0.1 open question 6, now resolved):
 
-- Use Unix socket inside the container only.
-- Add optional local TCP listener for container use later.
-
-MVP recommendation: keep Unix socket for local binary/systemd. Document container service mode before adding container TUI access patterns.
+- The MVP uses the Unix socket only, inside the container as elsewhere.
+- No TCP listener is added in the MVP. An optional local TCP listener may be
+  considered post-MVP, together with container TUI access patterns.
 
 ## 23. Logging
 
@@ -1728,10 +1760,10 @@ Optional later:
 
 ```text
 golangci-lint run
-ko build ./cmd/uptimemonitor
+ko build .
 ```
 
-The exact command set should be encoded in `Makefile`, `justfile`, or task runner once chosen.
+The development command set is encoded in a `Makefile` (SPEC v0.1 open question 8, now resolved).
 
 ## 26. Implementation milestones
 
@@ -1815,20 +1847,28 @@ Deliver:
 - Example config.
 - Install/run documentation.
 
-## 27. Open technical questions
+## 27. Resolved technical questions
 
-The following questions remain open after SPEC v0.1:
+The technical questions left open by SPEC v0.1 are resolved as follows in SPEC
+v0.2. Each resolution is also reflected in the section noted.
 
-1. Should monitor IDs use ULID or UUIDv7?
-2. Should monitor deletion be soft-delete only, or hard-delete with retained TSDB samples?
-3. Should aggregated history be stored in SQLite or derived from TSDB on demand?
-4. Should the service implement a notification job table, or are `notification_attempts` enough for MVP retry state?
-5. Should the TUI support per-monitor notification target selection in MVP, or only global enabled targets plus per-monitor on/off?
-6. Should container deployments gain optional TCP IPC before the web UI exists?
-7. Should the future secret be stored only in config/env, or also represented in SQLite as a hash?
-8. Which task runner should encode development commands: Make, just, Task, or plain shell scripts?
+1. Monitor IDs use ULID (§3, §12.2).
+2. Monitor deletion is soft-delete: the row is retained with `deleted_at` set and
+   hidden from default listings, and TSDB samples expire through retention
+   (§10.5, §12.3).
+3. Aggregated history is computed on demand from TSDB; the MVP has no separate
+   aggregated-history store (§14.4).
+4. Retry state uses the `notification_attempts` table plus an in-memory job
+   queue; no separate job table is added (§18.6).
+5. The MVP uses global enabled targets plus a per-monitor `notifications_enabled`
+   on/off flag; there is no per-monitor target selection (§18.6).
+6. Container deployments use the Unix socket only; no TCP IPC is added in the MVP
+   (§22.3).
+7. The future secret is loaded only from config/env in the MVP and is not stored
+   or hashed in SQLite (§20.2).
+8. Development commands are encoded in a `Makefile` (§3, §25).
 
-## 28. Acceptance criteria for SPEC v0.1 implementation
+## 28. Acceptance criteria for the MVP implementation
 
 An implementation satisfies this SPEC when:
 
@@ -1853,4 +1893,9 @@ An implementation satisfies this SPEC when:
 
 ```text
 0.1 - Initial technical specification derived from PRD v0.2.
+0.2 - Resolved all SPEC v0.1 open technical questions (§27). Added
+      internal/logging to the repository layout (§5). Documented the custom
+      duration decode hook for day and week suffixes (§8). Specified embedded,
+      in-process migration application at startup with no runtime dependency on
+      the atlas binary (§13). Corrected the ko build path (§25).
 ```
