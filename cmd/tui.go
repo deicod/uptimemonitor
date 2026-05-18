@@ -1,6 +1,5 @@
 /*
 Copyright © 2026 Darko Luketic <info@icod.de>
-
 */
 package cmd
 
@@ -10,31 +9,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// tuiCmd represents the tui command
+// tuiCmd represents the tui command.
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
+	Short: "Launch the Uptime Monitor terminal UI",
+	Long: `Launch the Uptime Monitor terminal UI.
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+The TUI is a client that connects to a running service over its local Unix
+socket and manages monitors, incidents, and notification targets. All reads
+and writes go through the service; the TUI never touches storage directly.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("tui called")
+		fmt.Fprintln(cmd.OutOrStdout(), "tui called")
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(tuiCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// tuiCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// tuiCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

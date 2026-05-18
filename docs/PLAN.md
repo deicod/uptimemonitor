@@ -147,7 +147,7 @@ and `docs/`. M0 cleans up that scaffold rather than creating it from scratch.
 Goal: the existing scaffold is production-shaped, the repo builds cleanly, and dev
 tooling is in place.
 
-- [ ] **M0.1 — Clean up the Cobra scaffold** — *deps: —*
+- [x] **M0.1 — Clean up the Cobra scaffold** — *deps: —*
   Replace placeholder `Short`/`Long` text in `cmd/root.go`, `cmd/service.go`,
   `cmd/tui.go` with real descriptions; remove the generated `--toggle` flag and
   the `$HOME/.uptimemonitor.yaml` search in `initConfig` (config wiring lands in

@@ -1,6 +1,5 @@
 /*
 Copyright © 2026 Darko Luketic <info@icod.de>
-
 */
 package cmd
 
@@ -10,31 +9,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// serviceCmd represents the service command
+// serviceCmd represents the service command.
 var serviceCmd = &cobra.Command{
 	Use:   "service",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
+	Short: "Run the Uptime Monitor service",
+	Long: `Run the long-lived Uptime Monitor service.
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+The service owns persistence, scheduling, probe execution, monitor state,
+incidents, notification delivery, and the local IPC server that the TUI
+connects to.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("service called")
+		fmt.Fprintln(cmd.OutOrStdout(), "service called")
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(serviceCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// serviceCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// serviceCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
