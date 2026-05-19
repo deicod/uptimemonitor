@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +11,22 @@ import (
 
 	"github.com/deicod/uptimemonitor/internal/ipc"
 )
+
+// deleteClient records the monitor ID a delete reached, and optionally
+// returns an error from DeleteMonitor — letting tests verify both the success
+// and failure paths of the confirm-then-delete flow.
+type deleteClient struct {
+	stubClient
+	deletedID string
+	deleteErr error
+}
+
+var _ Client = (*deleteClient)(nil)
+
+func (c *deleteClient) DeleteMonitor(_ context.Context, id string) error {
+	c.deletedID = id
+	return c.deleteErr
+}
 
 // sampleMonitors is a representative monitor list covering both enabled and
 // disabled monitors so the screen's rendering and selection are exercised.
@@ -131,6 +149,74 @@ func TestMonitorListEditKeyEmitsFormNavigation(t *testing.T) {
 	}
 	if msg.monitorID != "01B" {
 		t.Errorf("edit navigation carries monitor ID %q, want 01B", msg.monitorID)
+	}
+}
+
+// TestMonitorListDeleteKeyOpensConfirm verifies the delete key pushes a
+// confirmation dialog naming the selected monitor, so a destructive delete
+// always passes through confirmation (SPEC §19.4).
+func TestMonitorListDeleteKeyOpensConfirm(t *testing.T) {
+	dc := &deleteClient{stubClient: stubClient{monitors: sampleMonitors()}}
+	s := newMonitorListScreen(dc)
+	s.Update(monitorsLoadedMsg{monitors: sampleMonitors()})
+
+	_, cmd := s.Update(runeKey('d'))
+	if cmd == nil {
+		t.Fatal("delete key produced no command")
+	}
+	push, ok := cmd().(pushScreenMsg)
+	if !ok {
+		t.Fatalf("delete key emitted %T, want pushScreenMsg", cmd())
+	}
+	cs, ok := push.screen.(*confirmScreen)
+	if !ok {
+		t.Fatalf("delete key pushed %T, want *confirmScreen", push.screen)
+	}
+	if !strings.Contains(cs.View(), "API") {
+		t.Errorf("confirm prompt does not name the selected monitor:\n%s", cs.View())
+	}
+	if dc.deletedID != "" {
+		t.Error("delete reached the service before confirmation")
+	}
+}
+
+// TestMonitorListDeleteKeyEmptyListIsNoop verifies the delete key does nothing
+// when no monitor is selected, so the dialog cannot open with no target.
+func TestMonitorListDeleteKeyEmptyListIsNoop(t *testing.T) {
+	s := newMonitorListScreen(&deleteClient{})
+	s.Update(monitorsLoadedMsg{monitors: nil})
+
+	if _, cmd := s.Update(runeKey('d')); cmd != nil {
+		t.Fatalf("delete on an empty list emitted %T, want nil", cmd())
+	}
+}
+
+// TestDeleteMonitorCmdSuccess verifies a confirmed delete actually calls the
+// service and signals the list to re-fetch, so a successful delete removes the
+// row without the operator pressing refresh.
+func TestDeleteMonitorCmdSuccess(t *testing.T) {
+	dc := &deleteClient{}
+	cmd := deleteMonitorCmd(dc, "01A")
+	msg := cmd()
+	if _, ok := msg.(monitorsChangedMsg); !ok {
+		t.Fatalf("delete success produced %T, want monitorsChangedMsg", msg)
+	}
+	if dc.deletedID != "01A" {
+		t.Errorf("delete called with id %q, want 01A", dc.deletedID)
+	}
+}
+
+// TestDeleteMonitorCmdFailure verifies an IPC failure on delete is surfaced
+// through the error dialog (SPEC §19.4) rather than swallowed.
+func TestDeleteMonitorCmdFailure(t *testing.T) {
+	dc := &deleteClient{deleteErr: errors.New("boom")}
+	cmd := deleteMonitorCmd(dc, "01A")
+	em, ok := cmd().(errMsg)
+	if !ok {
+		t.Fatalf("delete failure produced %T, want errMsg", cmd())
+	}
+	if em.err == nil || !strings.Contains(em.err.Error(), "boom") {
+		t.Errorf("errMsg does not carry the underlying error: %v", em.err)
 	}
 }
 

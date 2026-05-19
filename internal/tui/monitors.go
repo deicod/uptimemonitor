@@ -35,6 +35,7 @@ var (
 	monitorOpenKey    = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail"))
 	monitorNewKey     = key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new"))
 	monitorEditKey    = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit"))
+	monitorDeleteKey  = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
 )
 
 // monitorRowStyle highlights the row under the cursor.
@@ -107,8 +108,19 @@ func (s *monitorListScreen) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			id := m.ID
 			return func() tea.Msg { return openMonitorFormMsg{monitorID: id} }
 		}
+	case key.Matches(msg, monitorDeleteKey):
+		if m, ok := s.selected(); ok {
+			return s.openDeleteConfirm(m)
+		}
 	}
 	return nil
+}
+
+// openDeleteConfirm pushes a confirmation dialog naming the monitor that is
+// about to be deleted (SPEC §19.4); confirming runs the delete over IPC.
+func (s *monitorListScreen) openDeleteConfirm(m ipc.MonitorResponse) tea.Cmd {
+	prompt := fmt.Sprintf("Delete monitor %q? This cannot be undone.", m.Name)
+	return PushScreen(newConfirmScreen("Delete monitor", prompt, deleteMonitorCmd(s.client, m.ID)))
 }
 
 // selected returns the monitor under the cursor; ok is false when the list is
@@ -159,7 +171,7 @@ func (s *monitorListScreen) View() string {
 		b.WriteString(row)
 		b.WriteString("\n")
 	}
-	b.WriteString("\n↑/↓ move • enter detail • n new • e edit • r refresh")
+	b.WriteString("\n↑/↓ move • enter detail • n new • e edit • d delete • r refresh")
 	return b.String()
 }
 
@@ -184,6 +196,18 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// deleteMonitorCmd deletes a monitor over IPC. On success it emits
+// monitorsChangedMsg so the list re-fetches after the confirm screen pops; on
+// failure it emits an errMsg for the root error dialog (SPEC §19.3–19.4).
+func deleteMonitorCmd(c Client, id string) tea.Cmd {
+	return func() tea.Msg {
+		if err := c.DeleteMonitor(context.Background(), id); err != nil {
+			return errMsg{err: err}
+		}
+		return monitorsChangedMsg{}
+	}
 }
 
 // fetchMonitorsCmd fetches the monitor list over IPC (SPEC §19.3).

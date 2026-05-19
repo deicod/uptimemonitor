@@ -466,7 +466,7 @@ the Bubble Tea / Bubbles / Lipgloss dependencies in M6.1.
   `validation_error` mapped to the correct field.
   *Context:* SPEC §12.3, §11.4, §11.2.
 
-- [ ] **M6.6 — Confirmation & error dialogs** — *deps: M6.4, M6.5*
+- [x] **M6.6 — Confirmation & error dialogs** — *deps: M6.4, M6.5*
   Add a reusable confirmation dialog (shows the affected object name) and an
   error dialog (SPEC §12.6, §19.4); route delete-monitor through confirmation.
   *Tests first:* confirm → action message, cancel → dismiss; error dialog renders
