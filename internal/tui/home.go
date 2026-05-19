@@ -4,9 +4,16 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/deicod/uptimemonitor/internal/ipc"
+)
+
+// homeStatusKey opens the dedicated service status screen.
+var homeStatusKey = key.NewBinding(
+	key.WithKeys("s"),
+	key.WithHelp("s", "status"),
 )
 
 // homeStatusLoadedMsg delivers the service status fetched by the home screen.
@@ -30,11 +37,16 @@ func (s *homeScreen) Init() tea.Cmd {
 	return fetchStatusCmd(s.client)
 }
 
-// Update stores the fetched status.
+// Update stores the fetched status and opens the status screen on its key.
 func (s *homeScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
-	if loaded, ok := msg.(homeStatusLoadedMsg); ok {
-		status := loaded.status
+	switch msg := msg.(type) {
+	case homeStatusLoadedMsg:
+		status := msg.status
 		s.status = &status
+	case tea.KeyPressMsg:
+		if key.Matches(msg, homeStatusKey) {
+			return s, PushScreen(newStatusScreen(s.client))
+		}
 	}
 	return s, nil
 }

@@ -438,7 +438,7 @@ the Bubble Tea / Bubbles / Lipgloss dependencies in M6.1.
   produces loaded/error messages using a fake client.
   *Context:* SPEC §19.1–19.3.
 
-- [ ] **M6.2 — Service status screen** — *deps: M6.1*
+- [x] **M6.2 — Service status screen** — *deps: M6.1*
   Add a status screen under `internal/tui/screens/` rendering the SPEC §12.5
   fields from `/v1/status`.
   *Tests first:* `Update` stores fetched status; `View` renders key fields.
