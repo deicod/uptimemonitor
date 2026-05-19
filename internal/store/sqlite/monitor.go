@@ -32,14 +32,10 @@ func NewMonitorRepo(s *Store) *MonitorRepo {
 	return &MonitorRepo{db: s.db}
 }
 
-// MonitorFilter narrows a List query. A nil field means "no constraint".
-type MonitorFilter struct {
-	// Enabled, when set, keeps only monitors with the given enabled flag.
-	Enabled *bool
-	// State, when set, keeps only monitors whose current monitor_states row
-	// has the given state.
-	State *monitor.MonitorState
-}
+// MonitorFilter narrows a List query. A nil field means "no constraint". It
+// aliases monitor.MonitorFilter so the monitor service can declare its
+// repository interface without importing this package (an import cycle).
+type MonitorFilter = monitor.MonitorFilter
 
 // Insert persists a new monitor. The caller supplies the ID and timestamps.
 func (r *MonitorRepo) Insert(ctx context.Context, m *monitor.Monitor) error {

@@ -388,7 +388,7 @@ Goal: domain types and all monitor-side SQLite repositories, fully tested.
 
 Goal: full monitor CRUD plus incident/event reads over IPC.
 
-- [ ] **M5.1 — Monitor service layer** — *deps: M4.2, M4.5*
+- [x] **M5.1 — Monitor service layer** — *deps: M4.2, M4.5*
   Add `internal/monitor/service.go`: create/get/list/update/delete/enable/disable
   orchestrating the repositories; validates input; writes events
   (`monitor_created`, etc.); initialises `monitor_states` to `unknown`/`paused`;
