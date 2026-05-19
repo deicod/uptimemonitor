@@ -109,6 +109,15 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, result a
 	}
 }
 
+// Status fetches the service status from GET /v1/status (SPEC §10.5).
+func (c *Client) Status(ctx context.Context) (StatusResponse, error) {
+	var resp StatusResponse
+	if err := c.Do(ctx, http.MethodGet, "/v1/status", nil, &resp); err != nil {
+		return StatusResponse{}, err
+	}
+	return resp, nil
+}
+
 // ConnectionError is returned when the client cannot reach the service socket.
 // It wraps the underlying network error and provides a user-friendly message
 // (SPEC §8.5).

@@ -298,7 +298,7 @@ gracefully, and the TUI command can connect.
   error envelope → typed error, missing socket → readable error.
   *Context:* SPEC §10; §8.5 (connection errors).
 
-- [ ] **M3.4 — `/v1/status` endpoint** — *deps: M3.2, M3.3*
+- [x] **M3.4 — `/v1/status` endpoint** — *deps: M3.2, M3.3*
   Add `internal/ipc/handlers.go` with a status handler returning the SPEC §10.5
   status shape, backed by a `StatusProvider` interface (version, uptime, storage
   health, scheduler, monitor counts). Add the client `Status()` method.
