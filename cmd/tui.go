@@ -22,7 +22,7 @@ and writes go through the service; the TUI never touches storage directly.`,
 	// usage error; suppress the usage dump.
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		return app.RunTUI(cmd.Context(), cfg, cmd.OutOrStdout())
+		return app.RunTUI(cmd.Context(), cfg, cmd.InOrStdin(), cmd.OutOrStdout())
 	},
 }
 

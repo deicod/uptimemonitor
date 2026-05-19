@@ -11,11 +11,11 @@ import (
 	"github.com/deicod/uptimemonitor/internal/ipc"
 )
 
-// TestRunTUIConnectsAndPrintsStatus verifies the TUI bootstrap connects to a
-// running service over its Unix socket and reports the service status. This
-// matters because the TUI is purely a client (SPEC §9.2): if it cannot read
-// status from the service the operator has no way to manage monitors.
-func TestRunTUIConnectsAndPrintsStatus(t *testing.T) {
+// TestRunTUILaunchesAgainstRunningService verifies the TUI bootstrap connects
+// to a running service and launches the Bubble Tea UI, then exits cleanly when
+// its context is cancelled. The TUI is purely a client (SPEC §9.2): it must
+// come up against a live service so the operator can manage monitors.
+func TestRunTUILaunchesAgainstRunningService(t *testing.T) {
 	cfg := testConfig(t)
 
 	serviceCtx, stopService := context.WithCancel(context.Background())
@@ -27,12 +27,25 @@ func TestRunTUIConnectsAndPrintsStatus(t *testing.T) {
 	// Wait for the service to bind its socket before the TUI connects.
 	waitForStatus(t, ipc.NewClient(cfg.SocketPath))
 
+	tuiCtx, stopTUI := context.WithCancel(context.Background())
 	var out bytes.Buffer
-	if err := app.RunTUI(context.Background(), cfg, &out); err != nil {
-		t.Fatalf("RunTUI returned error against a running service: %v", err)
-	}
-	if !strings.Contains(out.String(), "ready") {
-		t.Errorf("RunTUI output does not report service state:\n%s", out.String())
+	tuiDone := make(chan error, 1)
+	go func() {
+		tuiDone <- app.RunTUI(tuiCtx, cfg, strings.NewReader(""), &out)
+	}()
+
+	// Give the program a moment to start, then cancel its context. A cancelled
+	// context is a clean shutdown, so RunTUI must return without error.
+	time.Sleep(300 * time.Millisecond)
+	stopTUI()
+
+	select {
+	case err := <-tuiDone:
+		if err != nil {
+			t.Fatalf("RunTUI returned error against a running service: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("RunTUI did not exit after its context was cancelled")
 	}
 
 	stopService()
@@ -50,7 +63,7 @@ func TestRunTUIServiceDown(t *testing.T) {
 	cfg := testConfig(t)
 
 	var out bytes.Buffer
-	err := app.RunTUI(context.Background(), cfg, &out)
+	err := app.RunTUI(context.Background(), cfg, strings.NewReader(""), &out)
 	if err == nil {
 		t.Fatal("RunTUI succeeded with no service running")
 	}

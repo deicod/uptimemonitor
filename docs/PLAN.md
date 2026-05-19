@@ -429,7 +429,7 @@ Goal: full monitor CRUD plus incident/event reads over IPC.
 Goal: a working Bubble Tea TUI that can view and manage monitors over IPC. Add
 the Bubble Tea / Bubbles / Lipgloss dependencies in M6.1.
 
-- [ ] **M6.1 — Bubble Tea application shell** — *deps: M5.3*
+- [x] **M6.1 — Bubble Tea application shell** — *deps: M5.3*
   Add `internal/tui/app.go`, `model.go`, `update.go`, `view.go`, `keys.go`: a root
   model with a screen router/stack, a global keymap, the async IPC `tea.Cmd`
   pattern (SPEC §19.1–19.3), a status bar, and routing of errors to an error
