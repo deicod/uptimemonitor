@@ -312,7 +312,7 @@ gracefully, and the TUI command can connect.
   payload to a fake socket when set.
   *Context:* SPEC §21.2–21.3.
 
-- [ ] **M3.6 — Service application lifecycle** — *deps: M3.4, M3.5*
+- [x] **M3.6 — Service application lifecycle** — *deps: M3.4, M3.5*
   Add `internal/app/service.go`: the full startup sequence (SPEC §9.1) —
   config → logging → directories → SQLite → migrate → TSDB → stores → IPC server →
   systemd ready → block on signal → graceful shutdown (SPEC §9.3). Wire

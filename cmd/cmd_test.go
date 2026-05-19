@@ -5,10 +5,12 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -84,8 +86,74 @@ func TestVersionFlag(t *testing.T) {
 	}
 }
 
+// serviceConfig writes a config.yaml rooted under a temp directory and returns
+// the config-file path and the socket path it declares. Using temp paths keeps
+// the service-command tests from touching real system directories.
+func serviceConfig(t *testing.T) (cfgPath, socketPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	data := filepath.Join(dir, "data")
+	run := filepath.Join(dir, "run")
+	socketPath = filepath.Join(run, "um.sock")
+	content := "data_dir: " + data + "\n" +
+		"runtime_dir: " + run + "\n" +
+		"sqlite_path: " + filepath.Join(data, "config.db") + "\n" +
+		"tsdb_path: " + filepath.Join(data, "tsdb") + "\n" +
+		"socket_path: " + socketPath + "\n" +
+		"log_level: error\n"
+	cfgPath = writeConfig(t, content)
+	return cfgPath, socketPath
+}
+
+// runService runs `uptimemonitor service` with cfgPath in a goroutine, waits
+// for it to bind socketPath, then cancels its context to drive shutdown. It
+// returns the command's exit error. The shared rootCmd is safe here because
+// tests in this package run sequentially.
+func runService(t *testing.T, cfgPath, socketPath string) error {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	resetFlags(rootCmd)
+	rootCmd.SetArgs([]string{"service", "--config", cfgPath})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- rootCmd.ExecuteContext(ctx) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(socketPath); err == nil {
+			break
+		}
+		select {
+		case err := <-errCh:
+			t.Fatalf("service exited before binding its socket: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("service did not bind its socket within timeout")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel() // simulate SIGTERM
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatal("service did not exit after shutdown signal")
+		return nil
+	}
+}
+
+// TestServiceCommandRuns verifies the service subcommand starts the real
+// service and exits cleanly on a shutdown signal.
 func TestServiceCommandRuns(t *testing.T) {
-	if _, err := execute(t, "service"); err != nil {
+	cfgPath, socketPath := serviceConfig(t)
+	if err := runService(t, cfgPath, socketPath); err != nil {
 		t.Fatalf("service command returned error: %v", err)
 	}
 }
@@ -111,27 +179,11 @@ func writeConfig(t *testing.T, content string) string {
 // operator must learn exactly which key to fix.
 func TestInvalidConfigFailsFast(t *testing.T) {
 	path := writeConfig(t, "service:\n  check_workers: 0\n")
-	out, err := execute(t, "service", "--config", path)
+	_, err := execute(t, "service", "--config", path)
 	if err == nil {
 		t.Fatal("expected non-nil error for invalid config, got nil")
 	}
 	if !strings.Contains(err.Error(), "check_workers") {
 		t.Errorf("error %q does not name the offending field", err.Error())
-	}
-	if strings.Contains(out, "service called") {
-		t.Errorf("command Run executed despite invalid config:\n%s", out)
-	}
-}
-
-// TestValidConfigProceeds verifies a valid explicit --config lets the command
-// reach its Run.
-func TestValidConfigProceeds(t *testing.T) {
-	path := writeConfig(t, "log_level: debug\n")
-	out, err := execute(t, "service", "--config", path)
-	if err != nil {
-		t.Fatalf("service with valid config returned error: %v", err)
-	}
-	if !strings.Contains(out, "service called") {
-		t.Errorf("command Run did not execute:\n%s", out)
 	}
 }
