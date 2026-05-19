@@ -399,7 +399,7 @@ Goal: full monitor CRUD plus incident/event reads over IPC.
   and emits an event.
   *Context:* SPEC §11, §17 (paused semantics), §11.6 (events).
 
-- [ ] **M5.2 — Monitor IPC endpoints** — *deps: M3.2, M5.1*
+- [x] **M5.2 — Monitor IPC endpoints** — *deps: M3.2, M5.1*
   Add monitor handlers and routes: `GET`/`POST /v1/monitors`,
   `GET`/`PATCH`/`DELETE /v1/monitors/{id}` (SPEC §10.5). `PATCH` is
   partial-then-validate. Map domain/validation errors to error codes.

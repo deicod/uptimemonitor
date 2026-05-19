@@ -14,6 +14,7 @@ import (
 	"github.com/deicod/uptimemonitor/internal/config"
 	"github.com/deicod/uptimemonitor/internal/ipc"
 	"github.com/deicod/uptimemonitor/internal/logging"
+	"github.com/deicod/uptimemonitor/internal/monitor"
 	"github.com/deicod/uptimemonitor/internal/store/sqlite"
 	"github.com/deicod/uptimemonitor/internal/store/tsdb"
 	"github.com/deicod/uptimemonitor/internal/systemd"
@@ -58,7 +59,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		sqlite:    sq,
 		startedAt: time.Now(),
 	}
-	server := ipc.NewServer(cfg.SocketPath, ipc.NewRouter(provider))
+	monitorSvc := monitor.NewService(
+		sqlite.NewMonitorRepo(sq),
+		sqlite.NewMonitorStateRepo(sq),
+		sqlite.NewEventRepo(sq),
+	)
+	server := ipc.NewServer(cfg.SocketPath, ipc.NewRouter(provider, monitorSvc))
 
 	// The server is given its own cancellable context so every return path —
 	// including a failed or aborted startup — stops the goroutine and lets it

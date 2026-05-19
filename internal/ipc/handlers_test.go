@@ -72,7 +72,7 @@ func TestStatusHandler(t *testing.T) {
 
 func TestNewRouterStatusRoute(t *testing.T) {
 	want := sampleStatus()
-	mux := NewRouter(fakeStatusProvider{resp: want})
+	mux := NewRouter(fakeStatusProvider{resp: want}, nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
@@ -97,7 +97,7 @@ func TestClientStatus(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "test.sock")
 	want := sampleStatus()
 
-	srv := startTestServer(t, sock, NewRouter(fakeStatusProvider{resp: want}))
+	srv := startTestServer(t, sock, NewRouter(fakeStatusProvider{resp: want}, nil))
 	defer srv.cancel()
 
 	client := NewClient(sock)
