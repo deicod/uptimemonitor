@@ -158,9 +158,18 @@ func TestServiceCommandRuns(t *testing.T) {
 	}
 }
 
-func TestTUICommandRuns(t *testing.T) {
-	if _, err := execute(t, "tui"); err != nil {
-		t.Fatalf("tui command returned error: %v", err)
+// TestTUICommandFailsWhenServiceDown verifies the tui subcommand exits with a
+// readable error when no service is listening on the configured socket. The
+// TUI is a client (SPEC §9.2): with no service there is nothing to manage, and
+// the operator must see why rather than an empty screen.
+func TestTUICommandFailsWhenServiceDown(t *testing.T) {
+	cfgPath, socketPath := serviceConfig(t)
+	out, err := execute(t, "tui", "--config", cfgPath)
+	if err == nil {
+		t.Fatalf("tui command succeeded with no service running:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), socketPath) {
+		t.Errorf("error %q does not name the socket path the TUI tried", err.Error())
 	}
 }
 

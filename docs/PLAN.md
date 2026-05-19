@@ -321,7 +321,7 @@ gracefully, and the TUI command can connect.
   the socket, SIGTERM → clean exit with the socket removed.
   *Context:* SPEC §9.1, §9.3, §7.2.
 
-- [ ] **M3.7 — TUI service-connection bootstrap** — *deps: M3.3, M3.6*
+- [x] **M3.7 — TUI service-connection bootstrap** — *deps: M3.3, M3.6*
   Add `internal/app/tui.go`: load config, build the IPC client, fetch status, and
   surface a readable error if the service is down. Wire `cmd/tui.go` (no Bubble
   Tea yet — connect and print status; replaced in M6).
