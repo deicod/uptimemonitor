@@ -12,12 +12,16 @@ import (
 )
 
 // stubClient is a fake tui.Client used to test IPC commands without a running
-// service (SPEC §19.3, §24). Status and ListMonitors carry behaviour; the
-// remaining methods exist solely to satisfy the Client interface.
+// service (SPEC §19.3, §24). Status, ListMonitors, GetMonitor and the
+// monitor-scoped incident/event readers carry behaviour; the remaining methods
+// exist solely to satisfy the Client interface.
 type stubClient struct {
 	status    ipc.StatusResponse
 	statusErr error
 	monitors  []ipc.MonitorResponse
+	monitor   ipc.MonitorResponse
+	incidents []ipc.IncidentResponse
+	events    []ipc.EventResponse
 }
 
 func (c stubClient) Status(context.Context) (ipc.StatusResponse, error) {
@@ -32,8 +36,8 @@ func (stubClient) CreateMonitor(context.Context, ipc.CreateMonitorRequest) (ipc.
 	return ipc.MonitorResponse{}, nil
 }
 
-func (stubClient) GetMonitor(context.Context, string) (ipc.MonitorResponse, error) {
-	return ipc.MonitorResponse{}, nil
+func (c stubClient) GetMonitor(context.Context, string) (ipc.MonitorResponse, error) {
+	return c.monitor, nil
 }
 
 func (stubClient) UpdateMonitor(context.Context, string, ipc.UpdateMonitorRequest) (ipc.MonitorResponse, error) {
@@ -44,14 +48,14 @@ func (stubClient) DeleteMonitor(context.Context, string) error { return nil }
 
 func (stubClient) ListIncidents(context.Context) ([]ipc.IncidentResponse, error) { return nil, nil }
 
-func (stubClient) ListMonitorIncidents(context.Context, string) ([]ipc.IncidentResponse, error) {
-	return nil, nil
+func (c stubClient) ListMonitorIncidents(context.Context, string) ([]ipc.IncidentResponse, error) {
+	return c.incidents, nil
 }
 
 func (stubClient) ListEvents(context.Context) ([]ipc.EventResponse, error) { return nil, nil }
 
-func (stubClient) ListMonitorEvents(context.Context, string) ([]ipc.EventResponse, error) {
-	return nil, nil
+func (c stubClient) ListMonitorEvents(context.Context, string) ([]ipc.EventResponse, error) {
+	return c.events, nil
 }
 
 // TestIPCCmdSuccess verifies the async IPC command pattern (SPEC §19.3): a

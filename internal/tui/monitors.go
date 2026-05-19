@@ -67,6 +67,8 @@ func (s *monitorListScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.monitors = msg.monitors
 		s.loaded = true
 		s.clampCursor()
+	case openMonitorDetailMsg:
+		return s, PushScreen(newMonitorDetailScreen(s.client, msg.monitorID))
 	case tea.KeyPressMsg:
 		return s, s.handleKey(msg)
 	}

@@ -451,7 +451,7 @@ the Bubble Tea / Bubbles / Lipgloss dependencies in M6.1.
   messages are emitted.
   *Context:* SPEC §12.1, §19.
 
-- [ ] **M6.4 — Monitor detail screen** — *deps: M6.3, M5.4*
+- [x] **M6.4 — Monitor detail screen** — *deps: M6.3, M5.4*
   Add a monitor detail screen per SPEC §12.2: config, current state, recent
   checks, incidents, events (history is a placeholder until M8; notification
   summary a placeholder until M9).
