@@ -353,7 +353,7 @@ Goal: domain types and all monitor-side SQLite repositories, fully tested.
   valid status range, positive timeout/interval; valid baseline.
   *Context:* SPEC §11.1–11.2.
 
-- [ ] **M4.3 — Monitor repository (SQLite)** — *deps: M2.3, M4.1*
+- [x] **M4.3 — Monitor repository (SQLite)** — *deps: M2.3, M4.1*
   Implement monitor CRUD in `internal/store/sqlite`: insert, get, list (filters:
   `state`, `enabled`), update, soft-delete.
   *Tests first:* integration on a temp migrated DB — round-trip, list filters,
