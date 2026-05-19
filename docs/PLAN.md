@@ -329,7 +329,7 @@ gracefully, and the TUI command can connect.
   friendly error and non-zero exit.
   *Context:* SPEC §7.3, §9.2.
 
-- [ ] **M3.8 — M3 exit check** — *deps: M3.1–M3.7*
+- [x] **M3.8 — M3 exit check** — *deps: M3.1–M3.7*
   Verify (SPEC §28 partial): service starts with valid config, opens SQLite and
   TSDB, applies migrations, serves `/v1/status` over the socket, and the TUI
   command connects. Mark all M3 tasks complete.
