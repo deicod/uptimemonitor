@@ -407,7 +407,7 @@ Goal: full monitor CRUD plus incident/event reads over IPC.
   `not_found`, partial update.
   *Context:* SPEC §10.5 (monitors), §10.3.
 
-- [ ] **M5.3 — IPC client monitor methods** — *deps: M3.3, M5.2*
+- [x] **M5.3 — IPC client monitor methods** — *deps: M3.3, M5.2*
   Add `ListMonitors`, `CreateMonitor`, `GetMonitor`, `UpdateMonitor`,
   `DeleteMonitor` to the IPC client.
   *Tests first:* against a test server — each method round-trips; error envelope →

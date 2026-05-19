@@ -161,18 +161,18 @@ func (c *Client) wrapConnError(err error) error {
 // error code, used as a fallback when the response body is not a valid JSON
 // error envelope.
 func errorCodeFromHTTPStatus(status int) ErrorCode {
-	switch {
-	case status == http.StatusBadRequest:
+	switch status {
+	case http.StatusBadRequest:
 		return ErrBadRequest
-	case status == http.StatusUnprocessableEntity:
+	case http.StatusUnprocessableEntity:
 		return ErrValidation
-	case status == http.StatusNotFound:
+	case http.StatusNotFound:
 		return ErrNotFound
-	case status == http.StatusConflict:
+	case http.StatusConflict:
 		return ErrConflict
-	case status == http.StatusServiceUnavailable:
+	case http.StatusServiceUnavailable:
 		return ErrServiceUnavailable
-	case status == http.StatusBadGateway:
+	case http.StatusBadGateway:
 		return ErrProvider
 	default:
 		return ErrInternal
