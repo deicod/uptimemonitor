@@ -459,7 +459,7 @@ the Bubble Tea / Bubbles / Lipgloss dependencies in M6.1.
   renders state.
   *Context:* SPEC §12.2.
 
-- [ ] **M6.5 — Monitor form screen** — *deps: M6.3*
+- [x] **M6.5 — Monitor form screen** — *deps: M6.3*
   Add a create/edit form for HTTP monitors with all SPEC §11.4 fields; map server
   `validation_error.field` to the matching form field.
   *Tests first:* field navigation; client-side required checks; server

@@ -67,8 +67,14 @@ func (s *monitorListScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.monitors = msg.monitors
 		s.loaded = true
 		s.clampCursor()
+	case monitorsChangedMsg:
+		// A create or edit committed: re-fetch so the row reflects the change
+		// without the operator pressing refresh.
+		return s, fetchMonitorsCmd(s.client)
 	case openMonitorDetailMsg:
 		return s, PushScreen(newMonitorDetailScreen(s.client, msg.monitorID))
+	case openMonitorFormMsg:
+		return s, PushScreen(newMonitorFormScreen(s.client, msg.monitorID))
 	case tea.KeyPressMsg:
 		return s, s.handleKey(msg)
 	}
