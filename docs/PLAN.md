@@ -374,13 +374,13 @@ Goal: domain types and all monitor-side SQLite repositories, fully tested.
   open-incident lookup.
   *Context:* SPEC §11.5–11.6, §12.3.
 
-- [ ] **M4.6 — Settings repository** — *deps: M4.3*
+- [x] **M4.6 — Settings repository** — *deps: M4.3*
   Implement `settings` key/value JSON get/set (used for global toggles such as
   notifications-enabled).
   *Tests first:* integration — set/get/overwrite.
   *Context:* SPEC §12.3.
 
-- [ ] **M4.7 — M4 exit check** — *deps: M4.1–M4.6*
+- [x] **M4.7 — M4 exit check** — *deps: M4.1–M4.6*
   Verify domain types and all repositories pass integration tests on a temp
   migrated DB. Mark all M4 tasks complete.
 
