@@ -420,7 +420,7 @@ Goal: full monitor CRUD plus incident/event reads over IPC.
   *Tests first:* handler and client tests for each route.
   *Context:* SPEC §10.5 (incidents, events).
 
-- [ ] **M5.5 — M5 exit check** — *deps: M5.1–M5.4*
+- [x] **M5.5 — M5 exit check** — *deps: M5.1–M5.4*
   Verify an integration test covering create → list → get → update → delete over
   IPC plus incident/event reads. Mark all M5 tasks complete.
 

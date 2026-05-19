@@ -176,7 +176,7 @@ func updateMonitorHandler(svc MonitorService) http.HandlerFunc {
 		if req.Timeout != nil {
 			existing.Timeout = time.Duration(*req.Timeout)
 		}
-		if req.Config != nil {
+		if len(req.Config) > 0 && string(req.Config) != "null" {
 			existing.Config = req.Config
 		}
 		if req.NotificationsEnabled != nil {
