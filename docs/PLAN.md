@@ -367,7 +367,7 @@ Goal: domain types and all monitor-side SQLite repositories, fully tested.
   DESC`, prune.
   *Context:* SPEC §12.3, §12.5.
 
-- [ ] **M4.5 — Event & incident repositories** — *deps: M4.3*
+- [x] **M4.5 — Event & incident repositories** — *deps: M4.3*
   Implement `events` insert/list (global and by monitor) and `incidents`
   open/resolve/list plus find-open-by-monitor.
   *Tests first:* integration — event ordering, incident open→resolve lifecycle,
