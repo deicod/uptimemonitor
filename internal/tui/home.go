@@ -16,6 +16,12 @@ var homeStatusKey = key.NewBinding(
 	key.WithHelp("s", "status"),
 )
 
+// homeMonitorsKey opens the monitor list screen.
+var homeMonitorsKey = key.NewBinding(
+	key.WithKeys("m"),
+	key.WithHelp("m", "monitors"),
+)
+
 // homeStatusLoadedMsg delivers the service status fetched by the home screen.
 type homeStatusLoadedMsg struct{ status ipc.StatusResponse }
 
@@ -44,8 +50,11 @@ func (s *homeScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		status := msg.status
 		s.status = &status
 	case tea.KeyPressMsg:
-		if key.Matches(msg, homeStatusKey) {
+		switch {
+		case key.Matches(msg, homeStatusKey):
 			return s, PushScreen(newStatusScreen(s.client))
+		case key.Matches(msg, homeMonitorsKey):
+			return s, PushScreen(newMonitorListScreen(s.client))
 		}
 	}
 	return s, nil

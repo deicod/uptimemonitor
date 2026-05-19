@@ -444,7 +444,7 @@ the Bubble Tea / Bubbles / Lipgloss dependencies in M6.1.
   *Tests first:* `Update` stores fetched status; `View` renders key fields.
   *Context:* SPEC §12.5; §10.5 (status).
 
-- [ ] **M6.3 — Monitor list screen** — *deps: M6.1*
+- [x] **M6.3 — Monitor list screen** — *deps: M6.1*
   Add a monitor list screen with the SPEC §12.1 columns, refresh, selection, and
   navigation to detail/form. (The manual-check key is wired in M7.8.)
   *Tests first:* list populates from a fake client; selection moves; navigation

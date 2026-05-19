@@ -12,19 +12,20 @@ import (
 )
 
 // stubClient is a fake tui.Client used to test IPC commands without a running
-// service (SPEC §19.3, §24). Only Status carries behaviour; the remaining
-// methods exist solely to satisfy the Client interface.
+// service (SPEC §19.3, §24). Status and ListMonitors carry behaviour; the
+// remaining methods exist solely to satisfy the Client interface.
 type stubClient struct {
 	status    ipc.StatusResponse
 	statusErr error
+	monitors  []ipc.MonitorResponse
 }
 
 func (c stubClient) Status(context.Context) (ipc.StatusResponse, error) {
 	return c.status, c.statusErr
 }
 
-func (stubClient) ListMonitors(context.Context, ipc.MonitorListFilter) ([]ipc.MonitorResponse, error) {
-	return nil, nil
+func (c stubClient) ListMonitors(context.Context, ipc.MonitorListFilter) ([]ipc.MonitorResponse, error) {
+	return c.monitors, nil
 }
 
 func (stubClient) CreateMonitor(context.Context, ipc.CreateMonitorRequest) (ipc.MonitorResponse, error) {
