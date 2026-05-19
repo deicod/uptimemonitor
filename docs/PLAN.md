@@ -305,7 +305,7 @@ gracefully, and the TUI command can connect.
   *Tests first:* handler returns the expected JSON; client `Status()` decodes it.
   *Context:* SPEC §10.5 (service status).
 
-- [ ] **M3.5 — systemd readiness & watchdog** — *deps: M2.1*
+- [x] **M3.5 — systemd readiness & watchdog** — *deps: M2.1*
   Add `internal/systemd/notify.go`: `sd_notify` `READY=1`, a `WATCHDOG=1` pinger,
   and no-op behaviour when not run under systemd.
   *Tests first:* notify no-ops when `NOTIFY_SOCKET` is unset; writes the correct
