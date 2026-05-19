@@ -338,7 +338,7 @@ gracefully, and the TUI command can connect.
 
 Goal: domain types and all monitor-side SQLite repositories, fully tested.
 
-- [ ] **M4.1 — Domain types & ID generation** — *deps: M3.1*
+- [x] **M4.1 — Domain types & ID generation** — *deps: M3.1*
   Add `internal/monitor/model.go`: `Monitor`, `MonitorType`, `MonitorState`,
   `CheckResult`, `Incident`, `Event` (SPEC §11) with state constants; add a ULID
   ID helper.
