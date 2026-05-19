@@ -19,7 +19,7 @@ func startMonitorTestServer(t *testing.T, fake MonitorService) *Client {
 	t.Helper()
 	sock := filepath.Join(t.TempDir(), "test.sock")
 	// startTestServer registers its own cleanup that stops the server.
-	startTestServer(t, sock, NewRouter(fakeStatusProvider{}, fake))
+	startTestServer(t, sock, NewRouter(fakeStatusProvider{}, fake, nil, nil))
 	return NewClient(sock)
 }
 

@@ -79,18 +79,42 @@ func (r *IncidentRepo) List(ctx context.Context, monitorID string, limit int) ([
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list incidents for %s: %w", monitorID, err)
 	}
+	return scanIncidents(rows, "list incidents for "+monitorID)
+}
+
+// ListAll returns the most recent incidents across all monitors, newest first.
+// A non-positive limit returns all rows. It backs the global /v1/incidents
+// endpoint.
+func (r *IncidentRepo) ListAll(ctx context.Context, limit int) ([]*monitor.Incident, error) {
+	if limit <= 0 {
+		limit = -1 // SQLite treats a negative LIMIT as unbounded.
+	}
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT "+incidentColumns+" FROM incidents "+
+			"ORDER BY started_at DESC, id DESC LIMIT ?",
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list incidents: %w", err)
+	}
+	return scanIncidents(rows, "list incidents")
+}
+
+// scanIncidents drains a rows cursor into Incident values, closing it before
+// return.
+func scanIncidents(rows *sql.Rows, op string) ([]*monitor.Incident, error) {
 	defer rows.Close()
 
 	var incidents []*monitor.Incident
 	for rows.Next() {
 		in, err := scanIncident(rows)
 		if err != nil {
-			return nil, fmt.Errorf("sqlite: list incidents for %s: %w", monitorID, err)
+			return nil, fmt.Errorf("sqlite: %s: %w", op, err)
 		}
 		incidents = append(incidents, in)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("sqlite: list incidents for %s: %w", monitorID, err)
+		return nil, fmt.Errorf("sqlite: %s: %w", op, err)
 	}
 	return incidents, nil
 }

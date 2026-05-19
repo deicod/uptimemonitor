@@ -93,7 +93,7 @@ func TestDurationJSON(t *testing.T) {
 
 func TestCreateMonitorHandler(t *testing.T) {
 	fake := &fakeMonitorService{}
-	mux := NewRouter(fakeStatusProvider{}, fake)
+	mux := NewRouter(fakeStatusProvider{}, fake, nil, nil)
 
 	body := `{"name":"Example","type":"http","enabled":true,"interval":"60s",` +
 		`"timeout":"10s","config":{"url":"https://example.com","method":"GET",` +
@@ -139,7 +139,7 @@ func TestCreateMonitorValidationError(t *testing.T) {
 	fake := &fakeMonitorService{
 		createErr: &monitor.FieldError{Field: "url", Message: "must not be empty"},
 	}
-	mux := NewRouter(fakeStatusProvider{}, fake)
+	mux := NewRouter(fakeStatusProvider{}, fake, nil, nil)
 
 	body := `{"name":"Example","type":"http","interval":"60s","timeout":"10s","config":{}}`
 	rec := httptest.NewRecorder()
@@ -164,7 +164,7 @@ func TestCreateMonitorValidationError(t *testing.T) {
 // ---------- Create monitor: malformed JSON ----------
 
 func TestCreateMonitorBadJSON(t *testing.T) {
-	mux := NewRouter(fakeStatusProvider{}, &fakeMonitorService{})
+	mux := NewRouter(fakeStatusProvider{}, &fakeMonitorService{}, nil, nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/monitors", strings.NewReader("{not json"))
@@ -186,7 +186,7 @@ func TestCreateMonitorBadJSON(t *testing.T) {
 
 func TestGetMonitorNotFound(t *testing.T) {
 	fake := &fakeMonitorService{getErr: sqlite.ErrNotFound}
-	mux := NewRouter(fakeStatusProvider{}, fake)
+	mux := NewRouter(fakeStatusProvider{}, fake, nil, nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/monitors/01HXMISSING", nil)
@@ -206,7 +206,7 @@ func TestGetMonitorNotFound(t *testing.T) {
 
 func TestGetMonitorHandler(t *testing.T) {
 	fake := &fakeMonitorService{getResult: sampleMonitor()}
-	mux := NewRouter(fakeStatusProvider{}, fake)
+	mux := NewRouter(fakeStatusProvider{}, fake, nil, nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/monitors/01HX", nil)
@@ -228,7 +228,7 @@ func TestGetMonitorHandler(t *testing.T) {
 
 func TestUpdateMonitorPartial(t *testing.T) {
 	fake := &fakeMonitorService{getResult: sampleMonitor()}
-	mux := NewRouter(fakeStatusProvider{}, fake)
+	mux := NewRouter(fakeStatusProvider{}, fake, nil, nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/v1/monitors/01HX",
@@ -264,7 +264,7 @@ func TestUpdateMonitorPartial(t *testing.T) {
 
 func TestUpdateMonitorNotFound(t *testing.T) {
 	fake := &fakeMonitorService{getErr: sqlite.ErrNotFound}
-	mux := NewRouter(fakeStatusProvider{}, fake)
+	mux := NewRouter(fakeStatusProvider{}, fake, nil, nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/v1/monitors/01HX",
@@ -280,7 +280,7 @@ func TestUpdateMonitorNotFound(t *testing.T) {
 
 func TestDeleteMonitorHandler(t *testing.T) {
 	fake := &fakeMonitorService{}
-	mux := NewRouter(fakeStatusProvider{}, fake)
+	mux := NewRouter(fakeStatusProvider{}, fake, nil, nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/v1/monitors/01HX", nil)
@@ -296,7 +296,7 @@ func TestDeleteMonitorHandler(t *testing.T) {
 
 func TestDeleteMonitorNotFound(t *testing.T) {
 	fake := &fakeMonitorService{deleteErr: sqlite.ErrNotFound}
-	mux := NewRouter(fakeStatusProvider{}, fake)
+	mux := NewRouter(fakeStatusProvider{}, fake, nil, nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/v1/monitors/01HX", nil)
@@ -311,7 +311,7 @@ func TestDeleteMonitorNotFound(t *testing.T) {
 
 func TestListMonitorsHandler(t *testing.T) {
 	fake := &fakeMonitorService{listResult: []*monitor.Monitor{sampleMonitor()}}
-	mux := NewRouter(fakeStatusProvider{}, fake)
+	mux := NewRouter(fakeStatusProvider{}, fake, nil, nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/monitors?state=up&enabled=true", nil)
@@ -338,7 +338,7 @@ func TestListMonitorsHandler(t *testing.T) {
 }
 
 func TestListMonitorsInvalidState(t *testing.T) {
-	mux := NewRouter(fakeStatusProvider{}, &fakeMonitorService{})
+	mux := NewRouter(fakeStatusProvider{}, &fakeMonitorService{}, nil, nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/monitors?state=sideways", nil)

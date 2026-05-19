@@ -266,6 +266,67 @@ func TestIncidentRepoListByMonitor(t *testing.T) {
 	}
 }
 
+// TestIncidentRepoListAll verifies ListAll returns incidents across every
+// monitor, newest first — the global /v1/incidents endpoint depends on this
+// ordering and on incidents from different monitors being interleaved.
+func TestIncidentRepoListAll(t *testing.T) {
+	store := openMigrated(t)
+	ctx := context.Background()
+	monitorA := insertMonitor(t, store)
+	monitorB := insertOtherMonitor(t, store)
+	repo := NewIncidentRepo(store)
+
+	base := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+	// Interleave incidents between two monitors so ordering must be by time,
+	// not by monitor.
+	type seed struct {
+		monitorID string
+		offset    time.Duration
+	}
+	seeds := []seed{
+		{monitorA, 0},
+		{monitorB, time.Minute},
+		{monitorA, 2 * time.Minute},
+		{monitorB, 3 * time.Minute},
+	}
+	var ids []string
+	for _, s := range seeds {
+		in := &monitor.Incident{
+			ID:           monitor.NewID(),
+			MonitorID:    s.monitorID,
+			StartedAt:    base.Add(s.offset),
+			StartEventID: monitor.NewID(),
+		}
+		if err := repo.Open(ctx, in); err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		ids = append(ids, in.ID)
+	}
+
+	all, err := repo.ListAll(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(all) != 4 {
+		t.Fatalf("ListAll returned %d incidents, want 4", len(all))
+	}
+	// Newest first: seeds[3], seeds[2], seeds[1], seeds[0].
+	for i, id := range []string{ids[3], ids[2], ids[1], ids[0]} {
+		if all[i].ID != id {
+			t.Errorf("position %d = %s, want %s", i, all[i].ID, id)
+		}
+	}
+
+	// The limit caps the slice.
+	limited, err := repo.ListAll(ctx, 2)
+	if err != nil {
+		t.Fatalf("ListAll(limit=2): %v", err)
+	}
+	if len(limited) != 2 {
+		t.Errorf("ListAll(limit=2) returned %d, want 2", len(limited))
+	}
+}
+
 // insertOtherMonitor persists a second monitor with a distinct ID so a test
 // can assert per-monitor scoping.
 func insertOtherMonitor(t *testing.T, store *Store) string {

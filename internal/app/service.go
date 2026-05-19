@@ -59,12 +59,14 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		sqlite:    sq,
 		startedAt: time.Now(),
 	}
+	eventRepo := sqlite.NewEventRepo(sq)
 	monitorSvc := monitor.NewService(
 		sqlite.NewMonitorRepo(sq),
 		sqlite.NewMonitorStateRepo(sq),
-		sqlite.NewEventRepo(sq),
+		eventRepo,
 	)
-	server := ipc.NewServer(cfg.SocketPath, ipc.NewRouter(provider, monitorSvc))
+	router := ipc.NewRouter(provider, monitorSvc, sqlite.NewIncidentRepo(sq), eventRepo)
+	server := ipc.NewServer(cfg.SocketPath, router)
 
 	// The server is given its own cancellable context so every return path —
 	// including a failed or aborted startup — stops the goroutine and lets it

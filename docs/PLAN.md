@@ -414,7 +414,7 @@ Goal: full monitor CRUD plus incident/event reads over IPC.
   typed error.
   *Context:* SPEC §10.5 (monitors).
 
-- [ ] **M5.4 — Incident & event IPC endpoints + client** — *deps: M5.2, M5.3*
+- [x] **M5.4 — Incident & event IPC endpoints + client** — *deps: M5.2, M5.3*
   Add `GET /v1/incidents`, `GET /v1/monitors/{id}/incidents`, `GET /v1/events`,
   `GET /v1/monitors/{id}/events` with matching client methods.
   *Tests first:* handler and client tests for each route.
