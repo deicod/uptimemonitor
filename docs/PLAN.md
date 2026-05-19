@@ -346,7 +346,7 @@ Goal: domain types and all monitor-side SQLite repositories, fully tested.
   lexically sortable IDs.
   *Context:* SPEC §11; §6 decision 1.
 
-- [ ] **M4.2 — Monitor & HTTP-config validation** — *deps: M4.1*
+- [x] **M4.2 — Monitor & HTTP-config validation** — *deps: M4.1*
   Add `internal/monitor/validate.go`: monitor field validation plus
   `HTTPMonitorConfig` validation (SPEC §11.2 rules).
   *Tests first:* table-driven — absolute URL, `http`/`https` scheme, method `GET`,
