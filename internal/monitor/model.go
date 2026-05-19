@@ -90,6 +90,21 @@ type CheckResult struct {
 	HTTPStatusCode *int
 }
 
+// MonitorStatus is the current health snapshot of a monitor, persisted as one
+// row per monitor in the monitor_states table (SPEC §12.3). It is upserted
+// after every check; the consecutive counters drive the state machine.
+type MonitorStatus struct {
+	MonitorID            string
+	State                MonitorState
+	LastCheckID          *string
+	LastCheckedAt        *time.Time
+	LastSuccessAt        *time.Time
+	LastFailureAt        *time.Time
+	ConsecutiveSuccesses int
+	ConsecutiveFailures  int
+	UpdatedAt            time.Time
+}
+
 // Incident is an open or resolved period of downtime for a monitor
 // (SPEC §11.5).
 type Incident struct {

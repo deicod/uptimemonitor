@@ -360,7 +360,7 @@ Goal: domain types and all monitor-side SQLite repositories, fully tested.
   soft-delete hidden from the default list.
   *Context:* SPEC §12.1–12.3; §6 decision 2.
 
-- [ ] **M4.4 — Monitor-state & check-result repositories** — *deps: M4.3*
+- [x] **M4.4 — Monitor-state & check-result repositories** — *deps: M4.3*
   Implement `monitor_states` upsert/get and `check_results` insert / recent-list
   by monitor / prune-older-than.
   *Tests first:* integration — state upsert, recent ordering by `started_at

@@ -247,3 +247,49 @@ func nullTime(t *time.Time) any {
 	}
 	return t.UTC().Format(timeLayout)
 }
+
+// nullString maps an optional string to a nullable TEXT column value.
+func nullString(s *string) any {
+	if s == nil {
+		return nil
+	}
+	return *s
+}
+
+// nullText maps a plain string to a nullable TEXT column value, treating the
+// empty string as SQL NULL.
+func nullText(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// nullInt maps an optional int to a nullable INTEGER column value.
+func nullInt(i *int) any {
+	if i == nil {
+		return nil
+	}
+	return *i
+}
+
+// stringPtr converts a nullable TEXT column value to an optional string.
+func stringPtr(ns sql.NullString) *string {
+	if !ns.Valid {
+		return nil
+	}
+	s := ns.String
+	return &s
+}
+
+// timePtr parses a nullable TEXT timestamp column into an optional time.
+func timePtr(ns sql.NullString) (*time.Time, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	t, err := time.Parse(timeLayout, ns.String)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
