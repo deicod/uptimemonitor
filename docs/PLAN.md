@@ -496,7 +496,7 @@ recorded, and manual checks work.
   timeout → failure; bad host → sanitised error.
   *Context:* SPEC §15.2–15.4.
 
-- [ ] **M7.3 — Probe dispatcher** — *deps: M7.2*
+- [x] **M7.3 — Probe dispatcher** — *deps: M7.2*
   Add `internal/probe/runner.go`: select a runner by `MonitorType`, decode the
   monitor config, execute, and build a `CheckResult`.
   *Tests first:* dispatch to the HTTP runner; unknown type → error.
