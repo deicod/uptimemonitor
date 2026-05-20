@@ -488,7 +488,7 @@ recorded, and manual checks work.
   *Tests first:* `Result` zero-value and round-trip.
   *Context:* SPEC §15.1.
 
-- [ ] **M7.2 — HTTP probe runner** — *deps: M7.1, M4.2*
+- [x] **M7.2 — HTTP probe runner** — *deps: M7.1, M4.2*
   Add `internal/probe/http.go`: `GET` with per-monitor timeout, status capture,
   total-duration measurement, success classification by expected range, and
   sanitised transport errors (SPEC §15.2–15.4).
