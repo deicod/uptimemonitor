@@ -482,7 +482,7 @@ the Bubble Tea / Bubbles / Lipgloss dependencies in M6.1.
 Goal: monitors are checked on schedule, state transitions and incidents are
 recorded, and manual checks work.
 
-- [ ] **M7.1 — Probe result & runner interface** — *deps: M4.1*
+- [x] **M7.1 — Probe result & runner interface** — *deps: M4.1*
   Add `internal/probe/result.go` (`Result`) and the `Runner` interface (SPEC
   §15.1).
   *Tests first:* `Result` zero-value and round-trip.
