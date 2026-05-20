@@ -473,7 +473,7 @@ the Bubble Tea / Bubbles / Lipgloss dependencies in M6.1.
   the message.
   *Context:* SPEC §12.6, §19.4.
 
-- [ ] **M6.7 — M6 exit check** — *deps: M6.1–M6.6*
+- [x] **M6.7 — M6 exit check** — *deps: M6.1–M6.6*
   Verify (SPEC §28): a user can create, view, edit, and delete an HTTP monitor in
   the TUI with destructive actions confirmed. Mark all M6 tasks complete.
 
