@@ -502,7 +502,7 @@ recorded, and manual checks work.
   *Tests first:* dispatch to the HTTP runner; unknown type → error.
   *Context:* SPEC §15.
 
-- [ ] **M7.4 — Monitor state machine** — *deps: M4.1*
+- [x] **M7.4 — Monitor state machine** — *deps: M4.1*
   Add `internal/monitor/state.go`: a pure transition function (SPEC §17.2) plus a
   side-effect descriptor (emit event? open/resolve incident? queue down/recovery
   notification?) per SPEC §17.3.
