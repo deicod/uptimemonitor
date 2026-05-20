@@ -510,7 +510,7 @@ recorded, and manual checks work.
   `unknown→up`/`unknown→down` and pause.
   *Context:* SPEC §17.
 
-- [ ] **M7.5 — Scheduler & worker pool** — *deps: M5.1*
+- [x] **M7.5 — Scheduler & worker pool** — *deps: M5.1*
   Add `internal/scheduler/scheduler.go` and `worker.go`: per-monitor interval
   scheduling, a bounded worker pool (`check_workers`), the no-overlap rule (skip),
   a manual-trigger queue, and dynamic add/update/remove/enable/disable (SPEC §16).
