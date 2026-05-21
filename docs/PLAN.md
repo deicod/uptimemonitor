@@ -541,7 +541,7 @@ recorded, and manual checks work.
   *Tests first:* `Update` handles run → refresh; recent checks render.
   *Context:* SPEC §12.1–12.2.
 
-- [ ] **M7.9 — M7 exit check** — *deps: M7.1–M7.8*
+- [x] **M7.9 — M7 exit check** — *deps: M7.1–M7.8*
   Verify (SPEC §28): the scheduler checks monitors repeatedly, results are stored,
   transitions are recorded, and incidents open and resolve. Mark all M7 tasks
   complete.
