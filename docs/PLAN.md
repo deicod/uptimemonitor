@@ -589,7 +589,7 @@ the TUI shows a heartbeat-style history view.
   up/down/unknown/paused.
   *Context:* SPEC §13, §19.5; §6 decision 10.
 
-- [ ] **M8.6 — M8 exit check** — *deps: M8.1–M8.5*
+- [x] **M8.6 — M8 exit check** — *deps: M8.1–M8.5*
   Verify samples are written per check, history is queryable across all MVP
   ranges, retention runs, and the TUI shows history. Mark all M8 tasks complete.
 
