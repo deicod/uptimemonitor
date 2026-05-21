@@ -183,10 +183,17 @@ func TestM7ExitCheck(t *testing.T) {
 	// --- Phase 3: recover → state up + incident resolved. ---
 	prober.set(probeOutcome{success: true})
 
+	// The pipeline resolves the incident and upserts the new state in two
+	// separate writes (pipeline.go), so polling on "incident resolved" alone
+	// races against the state upsert. Wait on both invariants together.
 	waitUntil(t, func() bool {
-		_, err := incidentRepo.FindOpenByMonitor(ctx, m.ID)
-		return errors.Is(err, sqlite.ErrNotFound)
-	}, 2*time.Second, "open incident to be resolved")
+		_, ierr := incidentRepo.FindOpenByMonitor(ctx, m.ID)
+		if !errors.Is(ierr, sqlite.ErrNotFound) {
+			return false
+		}
+		st, serr := stateRepo.Get(ctx, m.ID)
+		return serr == nil && st.State == monitor.StateUp
+	}, 2*time.Second, "open incident to be resolved and state to flip to up")
 
 	st, err := stateRepo.Get(ctx, m.ID)
 	if err != nil {
