@@ -613,7 +613,7 @@ M9.1–M9.4 are done.
   metadata.
   *Context:* SPEC §18.3, §10.5 (providers).
 
-- [ ] **M9.3 — Message templating** — *deps: M9.1*
+- [x] **M9.3 — Message templating** — *deps: M9.1*
   Add `internal/notify/template.go`: render title/body for `monitor_down`,
   `monitor_recovered`, and `manual_test` (SPEC §18.2) with no secrets in output.
   *Tests first:* each event type renders the expected text.
