@@ -535,7 +535,7 @@ recorded, and manual checks work.
   does not change `paused` state.
   *Context:* SPEC §10.5, §16.4.
 
-- [ ] **M7.8 — TUI live state & manual checks** — *deps: M7.7, M6.4*
+- [x] **M7.8 — TUI live state & manual checks** — *deps: M7.7, M6.4*
   Show live state and recent checks in the monitor list/detail screens; add a
   manual-check key that calls `/run` and refreshes.
   *Tests first:* `Update` handles run → refresh; recent checks render.

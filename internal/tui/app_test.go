@@ -22,6 +22,8 @@ type stubClient struct {
 	monitor   ipc.MonitorResponse
 	incidents []ipc.IncidentResponse
 	events    []ipc.EventResponse
+	checks    []ipc.CheckResultResponse
+	run       ipc.RunMonitorResponse
 }
 
 func (c stubClient) Status(context.Context) (ipc.StatusResponse, error) {
@@ -56,6 +58,14 @@ func (stubClient) ListEvents(context.Context) ([]ipc.EventResponse, error) { ret
 
 func (c stubClient) ListMonitorEvents(context.Context, string) ([]ipc.EventResponse, error) {
 	return c.events, nil
+}
+
+func (c stubClient) RunMonitor(context.Context, string) (ipc.RunMonitorResponse, error) {
+	return c.run, nil
+}
+
+func (c stubClient) RecentChecks(context.Context, string, int) ([]ipc.CheckResultResponse, error) {
+	return c.checks, nil
 }
 
 // TestIPCCmdSuccess verifies the async IPC command pattern (SPEC §19.3): a

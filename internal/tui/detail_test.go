@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -39,12 +40,27 @@ func sampleDetailEvents() []ipc.EventResponse {
 	}
 }
 
-// detailStub is a fake client carrying the detail screen's three responses.
+// sampleDetailChecks is a representative recent-checks list for the detail
+// tests; the first entry is treated as the live state by the detail screen.
+func sampleDetailChecks() []ipc.CheckResultResponse {
+	status := 200
+	now := time.Now()
+	return []ipc.CheckResultResponse{
+		{ID: "c2", MonitorID: "01A", StartedAt: now.Add(-1 * time.Minute), FinishedAt: now.Add(-1 * time.Minute).Add(120 * time.Millisecond),
+			DurationMs: 120, Success: true, State: "up", HTTPStatusCode: &status},
+		{ID: "c1", MonitorID: "01A", StartedAt: now.Add(-2 * time.Minute), FinishedAt: now.Add(-2 * time.Minute).Add(800 * time.Millisecond),
+			DurationMs: 800, Success: false, State: "down", Error: "dial tcp: connection refused"},
+	}
+}
+
+// detailStub is a fake client carrying the detail screen's four responses.
 func detailStub() stubClient {
 	return stubClient{
 		monitor:   sampleDetailMonitor(),
 		incidents: sampleDetailIncidents(),
 		events:    sampleDetailEvents(),
+		checks:    sampleDetailChecks(),
+		run:       ipc.RunMonitorResponse{Status: "queued"},
 	}
 }
 
@@ -139,6 +155,116 @@ func TestMonitorDetailRefreshKey(t *testing.T) {
 	_, cmd := s.Update(runeKey('r'))
 	if cmd == nil {
 		t.Fatal("refresh key produced no command")
+	}
+}
+
+// runRecordingClient embeds stubClient and records every RunMonitor and
+// RecentChecks invocation so the manual-check tests can assert the detail
+// screen actually called the service and the limit propagated.
+type runRecordingClient struct {
+	stubClient
+	runIDs    []string
+	checkIDs  []string
+	checkLims []int
+}
+
+var _ Client = (*runRecordingClient)(nil)
+
+func (c *runRecordingClient) RunMonitor(_ context.Context, id string) (ipc.RunMonitorResponse, error) {
+	c.runIDs = append(c.runIDs, id)
+	return c.stubClient.run, nil
+}
+
+func (c *runRecordingClient) RecentChecks(_ context.Context, id string, limit int) ([]ipc.CheckResultResponse, error) {
+	c.checkIDs = append(c.checkIDs, id)
+	c.checkLims = append(c.checkLims, limit)
+	return c.stubClient.checks, nil
+}
+
+// executeSequence drives a tea.Sequence/Batch composite command by recursively
+// invoking every leaf command, so a test can observe the side effects (recorded
+// IPC calls) without standing up a real Bubble Tea runtime.
+func executeSequence(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	if cmds, ok := toCmdSlice(msg); ok {
+		for _, c := range cmds {
+			executeSequence(c)
+		}
+		return
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			executeSequence(c)
+		}
+	}
+}
+
+// TestMonitorDetailLoadsRecentChecks verifies the detail screen fetches recent
+// checks on Init alongside the monitor, incidents, and events, so the operator
+// sees the latest probe outcomes without leaving the screen (PLAN M7.8).
+func TestMonitorDetailLoadsRecentChecks(t *testing.T) {
+	s := newMonitorDetailScreen(detailStub(), "01A")
+
+	scr := applyBatch(t, s, s.Init())
+	ds := scr.(*monitorDetailScreen)
+	if len(ds.checks) != 2 {
+		t.Fatalf("detail screen did not cache recent checks: %+v", ds.checks)
+	}
+	if ds.checks[0].ID != "c2" {
+		t.Errorf("recent checks not ordered as returned by IPC: %+v", ds.checks)
+	}
+}
+
+// TestMonitorDetailViewRendersLiveStateAndChecks verifies the View renders the
+// live state derived from the most recent check and a row per recent check, so
+// the placeholder text from M6.4 is replaced (PLAN M7.8).
+func TestMonitorDetailViewRendersLiveStateAndChecks(t *testing.T) {
+	s := newMonitorDetailScreen(detailStub(), "01A")
+	scr := applyBatch(t, s, s.Init())
+
+	view := scr.View()
+	for _, want := range []string{
+		"state:     up",
+		"200",
+		"120ms",
+		"dial tcp: connection refused",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("detail view missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "shown from M7.8") {
+		t.Errorf("detail view still shows the M6.4 placeholder:\n%s", view)
+	}
+}
+
+// TestMonitorDetailManualCheckTriggersRunAndRefresh verifies the manual-check
+// key calls RunMonitor and then re-fetches the screen's data, so a triggered
+// check is observable on the screen without a manual refresh (PLAN M7.8).
+func TestMonitorDetailManualCheckTriggersRunAndRefresh(t *testing.T) {
+	rc := &runRecordingClient{stubClient: detailStub()}
+	s := newMonitorDetailScreen(rc, "01A")
+	_ = applyBatch(t, s, s.Init())
+	beforeChecks := len(rc.checkIDs)
+
+	_, cmd := s.Update(runeKey('c'))
+	if cmd == nil {
+		t.Fatal("manual-check key produced no command")
+	}
+	// The command is a tea.Sequence: RunMonitor first, then the batched
+	// re-fetch. tea.Sequence produces an unexported []tea.Cmd-shaped message,
+	// which toCmdSlice detects via reflection (shared with M6 exit tests).
+	executeSequence(cmd)
+
+	if len(rc.runIDs) != 1 || rc.runIDs[0] != "01A" {
+		t.Errorf("RunMonitor was not called for the displayed monitor: %v", rc.runIDs)
+	}
+	if len(rc.checkIDs) <= beforeChecks {
+		t.Errorf("manual-check key did not refresh recent checks; before=%d after=%d",
+			beforeChecks, len(rc.checkIDs))
 	}
 }
 

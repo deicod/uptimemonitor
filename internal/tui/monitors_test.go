@@ -240,10 +240,63 @@ func TestMonitorListViewRendersColumns(t *testing.T) {
 	s.Update(monitorsLoadedMsg{monitors: sampleMonitors()})
 
 	view := s.View()
-	for _, want := range []string{"NAME", "TYPE", "INTERVAL", "API", "Website", "1m0s"} {
+	for _, want := range []string{"NAME", "TYPE", "INTERVAL", "STATE", "API", "Website", "1m0s"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("monitor list view missing %q:\n%s", want, view)
 		}
+	}
+}
+
+// TestMonitorListShowsLiveState verifies each monitor row reflects the latest
+// observed state once the per-monitor recent-checks fetches return, so the
+// operator can see at a glance which monitors are up or down (PLAN M7.8).
+func TestMonitorListShowsLiveState(t *testing.T) {
+	s := newMonitorListScreen(stubClient{})
+	s.Update(monitorsLoadedMsg{monitors: sampleMonitors()})
+
+	s.Update(monitorStateLoadedMsg{monitorID: "01A", state: "up"})
+	s.Update(monitorStateLoadedMsg{monitorID: "01B", state: "down"})
+
+	view := s.View()
+	apiLine, websiteLine := lineFor(view, "API"), lineFor(view, "Website")
+	if !strings.Contains(apiLine, "up") {
+		t.Errorf("API row does not show state up:\n%s", apiLine)
+	}
+	if !strings.Contains(websiteLine, "down") {
+		t.Errorf("Website row does not show state down:\n%s", websiteLine)
+	}
+}
+
+// lineFor finds the first line in s containing needle. Used to assert per-row
+// content without depending on column widths or whitespace.
+func lineFor(s, needle string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return ""
+}
+
+// TestMonitorListFetchesStateOnLoad verifies that after the monitor list is
+// loaded, the screen issues a per-monitor recent-checks lookup so the state
+// column can be populated without operator action (PLAN M7.8).
+func TestMonitorListFetchesStateOnLoad(t *testing.T) {
+	rc := &runRecordingClient{stubClient: stubClient{
+		checks: []ipc.CheckResultResponse{{State: "up"}},
+	}}
+	s := newMonitorListScreen(rc)
+
+	_, cmd := s.Update(monitorsLoadedMsg{monitors: sampleMonitors()})
+	if cmd == nil {
+		t.Fatal("loading monitors did not schedule a state fetch")
+	}
+	// The screen emits a batch of per-monitor RecentChecks commands.
+	for _, c := range collectCmds(cmd) {
+		c()
+	}
+	if len(rc.checkIDs) != 2 {
+		t.Errorf("expected one RecentChecks call per monitor, got %d (%v)", len(rc.checkIDs), rc.checkIDs)
 	}
 }
 

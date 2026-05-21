@@ -17,6 +17,13 @@ import (
 // screen.
 type monitorsLoadedMsg struct{ monitors []ipc.MonitorResponse }
 
+// monitorStateLoadedMsg delivers the live state for a single monitor row,
+// derived from that monitor's most recent check (PLAN M7.8).
+type monitorStateLoadedMsg struct {
+	monitorID string
+	state     string
+}
+
 // openMonitorDetailMsg requests navigation to the detail screen for a monitor.
 // The monitor list screen emits it on the select key; the detail screen
 // (PLAN M6.4) handles it.
@@ -49,13 +56,14 @@ var monitorRowStyle = lipgloss.NewStyle().
 type monitorListScreen struct {
 	client   Client
 	monitors []ipc.MonitorResponse
+	states   map[string]string
 	cursor   int
 	loaded   bool
 }
 
 // newMonitorListScreen builds the monitor list screen bound to client.
 func newMonitorListScreen(client Client) *monitorListScreen {
-	return &monitorListScreen{client: client}
+	return &monitorListScreen{client: client, states: map[string]string{}}
 }
 
 // Init fetches the monitor list (SPEC §19.3).
@@ -68,6 +76,9 @@ func (s *monitorListScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.monitors = msg.monitors
 		s.loaded = true
 		s.clampCursor()
+		return s, s.fetchStatesCmd()
+	case monitorStateLoadedMsg:
+		s.states[msg.monitorID] = msg.state
 	case monitorsChangedMsg:
 		// A create or edit committed: re-fetch so the row reflects the change
 		// without the operator pressing refresh.
@@ -80,6 +91,37 @@ func (s *monitorListScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		return s, s.handleKey(msg)
 	}
 	return s, nil
+}
+
+// fetchStatesCmd issues one RecentChecks(limit=1) per monitor in the list, so
+// the STATE column reflects each monitor's most recent observation. Returns
+// nil when the list is empty so no spurious batch is dispatched.
+func (s *monitorListScreen) fetchStatesCmd() tea.Cmd {
+	if len(s.monitors) == 0 {
+		return nil
+	}
+	cmds := make([]tea.Cmd, 0, len(s.monitors))
+	for _, m := range s.monitors {
+		cmds = append(cmds, fetchMonitorStateCmd(s.client, m.ID))
+	}
+	return tea.Batch(cmds...)
+}
+
+// fetchMonitorStateCmd fetches the latest check for monitorID and emits a
+// monitorStateLoadedMsg with its state, or "unknown" when no check exists yet.
+func fetchMonitorStateCmd(c Client, monitorID string) tea.Cmd {
+	return ipcCmd(
+		func(ctx context.Context) ([]ipc.CheckResultResponse, error) {
+			return c.RecentChecks(ctx, monitorID, 1)
+		},
+		func(checks []ipc.CheckResultResponse) tea.Msg {
+			state := "unknown"
+			if len(checks) > 0 {
+				state = checks[0].State
+			}
+			return monitorStateLoadedMsg{monitorID: monitorID, state: state}
+		},
+	)
 }
 
 // handleKey applies a key press to the screen and returns any resulting
@@ -112,8 +154,28 @@ func (s *monitorListScreen) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m, ok := s.selected(); ok {
 			return s.openDeleteConfirm(m)
 		}
+	case key.Matches(msg, monitorManualCheckKey):
+		if m, ok := s.selected(); ok {
+			return s.runManualCheckCmd(m.ID)
+		}
 	}
 	return nil
+}
+
+// runManualCheckCmd triggers a manual check for monitorID and then refreshes
+// the list's state map so the row reflects the new observation without the
+// operator pressing refresh (PLAN M7.8).
+func (s *monitorListScreen) runManualCheckCmd(monitorID string) tea.Cmd {
+	client := s.client
+	return tea.Sequence(
+		ipcCmd(
+			func(ctx context.Context) (ipc.RunMonitorResponse, error) {
+				return client.RunMonitor(ctx, monitorID)
+			},
+			func(ipc.RunMonitorResponse) tea.Msg { return monitorManualCheckQueuedMsg{} },
+		),
+		fetchMonitorStateCmd(client, monitorID),
+	)
 }
 
 // openDeleteConfirm pushes a confirmation dialog naming the monitor that is
@@ -155,13 +217,13 @@ func (s *monitorListScreen) View() string {
 		b.WriteString("no monitors — press n to create one")
 		return b.String()
 	}
-	fmt.Fprintf(&b, "  %-28s %-6s %-10s %-8s %s\n",
-		"NAME", "TYPE", "INTERVAL", "ENABLED", "NOTIFY")
+	fmt.Fprintf(&b, "  %-28s %-6s %-10s %-8s %-8s %s\n",
+		"NAME", "TYPE", "INTERVAL", "STATE", "ENABLED", "NOTIFY")
 	for i, m := range s.monitors {
-		row := fmt.Sprintf("%-28s %-6s %-10s %-8s %s",
+		row := fmt.Sprintf("%-28s %-6s %-10s %-8s %-8s %s",
 			truncate(m.Name, 28), m.Type,
 			time.Duration(m.Interval).String(),
-			yesNo(m.Enabled), yesNo(m.NotificationsEnabled))
+			s.stateFor(m), yesNo(m.Enabled), yesNo(m.NotificationsEnabled))
 		cursor := "  "
 		if i == s.cursor {
 			cursor = "› "
@@ -171,8 +233,22 @@ func (s *monitorListScreen) View() string {
 		b.WriteString(row)
 		b.WriteString("\n")
 	}
-	b.WriteString("\n↑/↓ move • enter detail • n new • e edit • d delete • r refresh")
+	b.WriteString("\n↑/↓ move • enter detail • n new • e edit • c check now • d delete • r refresh")
 	return b.String()
+}
+
+// stateFor returns the live state to render for monitor m. The state map is
+// populated asynchronously after the list load (PLAN M7.8); until it arrives,
+// the row falls back to paused for disabled monitors and a dash placeholder
+// otherwise, so the column never appears blank.
+func (s *monitorListScreen) stateFor(m ipc.MonitorResponse) string {
+	if st, ok := s.states[m.ID]; ok {
+		return st
+	}
+	if !m.Enabled {
+		return "paused"
+	}
+	return "—"
 }
 
 // Title is the screen name shown in the status bar.
