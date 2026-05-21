@@ -53,7 +53,24 @@ func sampleDetailChecks() []ipc.CheckResultResponse {
 	}
 }
 
-// detailStub is a fake client carrying the detail screen's four responses.
+// sampleDetailHistory is a representative history response carrying one point
+// per supported state, so the View tests can assert every glyph renders.
+func sampleDetailHistory() ipc.HistoryResponse {
+	start := time.Date(2026, 5, 21, 11, 0, 0, 0, time.UTC)
+	return ipc.HistoryResponse{
+		MonitorID:  "01A",
+		Range:      "24h",
+		Resolution: "15m",
+		Points: []ipc.HistoryPointResponse{
+			{Start: start, End: start.Add(15 * time.Minute), State: "up"},
+			{Start: start.Add(15 * time.Minute), End: start.Add(30 * time.Minute), State: "down"},
+			{Start: start.Add(30 * time.Minute), End: start.Add(45 * time.Minute), State: "unknown"},
+			{Start: start.Add(45 * time.Minute), End: start.Add(60 * time.Minute), State: "paused"},
+		},
+	}
+}
+
+// detailStub is a fake client carrying the detail screen's responses.
 func detailStub() stubClient {
 	return stubClient{
 		monitor:   sampleDetailMonitor(),
@@ -61,6 +78,7 @@ func detailStub() stubClient {
 		events:    sampleDetailEvents(),
 		checks:    sampleDetailChecks(),
 		run:       ipc.RunMonitorResponse{Status: "queued"},
+		history:   sampleDetailHistory(),
 	}
 }
 
@@ -158,14 +176,17 @@ func TestMonitorDetailRefreshKey(t *testing.T) {
 	}
 }
 
-// runRecordingClient embeds stubClient and records every RunMonitor and
-// RecentChecks invocation so the manual-check tests can assert the detail
-// screen actually called the service and the limit propagated.
+// runRecordingClient embeds stubClient and records every RunMonitor,
+// RecentChecks, and History invocation so the manual-check and history tests
+// can assert the detail screen actually called the service and that the
+// range parameter propagated (PLAN M7.8, M8.5).
 type runRecordingClient struct {
 	stubClient
-	runIDs    []string
-	checkIDs  []string
-	checkLims []int
+	runIDs       []string
+	checkIDs     []string
+	checkLims    []int
+	historyIDs   []string
+	historyRange []string
 }
 
 var _ Client = (*runRecordingClient)(nil)
@@ -179,6 +200,12 @@ func (c *runRecordingClient) RecentChecks(_ context.Context, id string, limit in
 	c.checkIDs = append(c.checkIDs, id)
 	c.checkLims = append(c.checkLims, limit)
 	return c.stubClient.checks, nil
+}
+
+func (c *runRecordingClient) History(_ context.Context, id, rangeStr string) (ipc.HistoryResponse, error) {
+	c.historyIDs = append(c.historyIDs, id)
+	c.historyRange = append(c.historyRange, rangeStr)
+	return c.stubClient.history, nil
 }
 
 // executeSequence drives a tea.Sequence/Batch composite command by recursively
@@ -265,6 +292,89 @@ func TestMonitorDetailManualCheckTriggersRunAndRefresh(t *testing.T) {
 	if len(rc.checkIDs) <= beforeChecks {
 		t.Errorf("manual-check key did not refresh recent checks; before=%d after=%d",
 			beforeChecks, len(rc.checkIDs))
+	}
+}
+
+// TestMonitorDetailLoadsHistory verifies the detail screen fetches the
+// monitor's history on Init using the default range, so the heartbeat row in
+// the history section reflects probe outcomes without the operator picking a
+// range first (PLAN M8.5).
+func TestMonitorDetailLoadsHistory(t *testing.T) {
+	s := newMonitorDetailScreen(detailStub(), "01A")
+
+	scr := applyBatch(t, s, s.Init())
+	ds := scr.(*monitorDetailScreen)
+	if ds.history == nil {
+		t.Fatal("detail screen did not cache history on Init")
+	}
+	if ds.history.Range != "24h" {
+		t.Errorf("default range = %q, want 24h", ds.history.Range)
+	}
+	if len(ds.history.Points) != 4 {
+		t.Fatalf("history points len = %d, want 4", len(ds.history.Points))
+	}
+}
+
+// TestMonitorDetailViewRendersHistoryGlyphs verifies the View renders one
+// glyph per history point, covering up/down/unknown/paused (SPEC §19.5). The
+// glyph row replaces the M6.4/M7.8 placeholder so the operator sees recent
+// outcomes at a glance.
+func TestMonitorDetailViewRendersHistoryGlyphs(t *testing.T) {
+	s := newMonitorDetailScreen(detailStub(), "01A")
+	scr := applyBatch(t, s, s.Init())
+
+	view := scr.View()
+	// One canonical glyph per SPEC §19.5 state row: up ▪, down x,
+	// unknown ?, paused -. The fixture orders the points up/down/unknown/paused,
+	// so the rendered substring is deterministic.
+	want := "▪x?-"
+	if !strings.Contains(view, want) {
+		t.Errorf("history view missing glyph row %q:\n%s", want, view)
+	}
+	if strings.Contains(view, "(history shown from M8") {
+		t.Errorf("history view still shows the M6.4 placeholder:\n%s", view)
+	}
+}
+
+// TestMonitorDetailRangeKeyRefetchesHistory verifies a range-selector key
+// re-fetches history with the chosen range, so the operator can scope the
+// heartbeat to a different SPEC §14.5 window without leaving the screen.
+func TestMonitorDetailRangeKeyRefetchesHistory(t *testing.T) {
+	rc := &runRecordingClient{stubClient: detailStub()}
+	s := newMonitorDetailScreen(rc, "01A")
+	_ = applyBatch(t, s, s.Init())
+	if len(rc.historyRange) == 0 || rc.historyRange[0] != "24h" {
+		t.Fatalf("initial history range = %v, want 24h first", rc.historyRange)
+	}
+	before := len(rc.historyRange)
+
+	// Key '2' selects the second supported range (6h), per SPEC §14.5 order.
+	_, cmd := s.Update(runeKey('2'))
+	if cmd == nil {
+		t.Fatal("range key produced no command")
+	}
+	executeSequence(cmd)
+
+	if len(rc.historyRange) <= before {
+		t.Fatalf("range key did not refetch history; calls before=%d after=%d",
+			before, len(rc.historyRange))
+	}
+	if got := rc.historyRange[len(rc.historyRange)-1]; got != "6h" {
+		t.Errorf("range after key '2' = %q, want 6h", got)
+	}
+}
+
+// TestMonitorDetailRangeKeyUpdatesHeader verifies the range selector key
+// updates the screen's active range immediately, so the View labels the row
+// with the new window even before the refetch lands.
+func TestMonitorDetailRangeKeyUpdatesHeader(t *testing.T) {
+	s := newMonitorDetailScreen(detailStub(), "01A")
+	_ = applyBatch(t, s, s.Init())
+
+	s.Update(runeKey('5')) // 5 → 30d
+
+	if s.historyRange != "30d" {
+		t.Errorf("active range after key '5' = %q, want 30d", s.historyRange)
 	}
 }
 

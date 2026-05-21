@@ -582,7 +582,7 @@ the TUI shows a heartbeat-style history view.
   *Tests first:* samples/rows past retention are removed; recent data is kept.
   *Context:* SPEC §14.4, §14.6, §12.5.
 
-- [ ] **M8.5 — TUI history visualization** — *deps: M8.3, M6.4*
+- [x] **M8.5 — TUI history visualization** — *deps: M8.3, M6.4*
   Add a heartbeat-style history indicator and a range selector to the monitor
   detail screen (SPEC §13, §19.5 glyphs).
   *Tests first:* `Update` loads history per range; `View` renders a glyph row for

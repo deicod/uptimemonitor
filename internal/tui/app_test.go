@@ -16,14 +16,16 @@ import (
 // monitor-scoped incident/event readers carry behaviour; the remaining methods
 // exist solely to satisfy the Client interface.
 type stubClient struct {
-	status    ipc.StatusResponse
-	statusErr error
-	monitors  []ipc.MonitorResponse
-	monitor   ipc.MonitorResponse
-	incidents []ipc.IncidentResponse
-	events    []ipc.EventResponse
-	checks    []ipc.CheckResultResponse
-	run       ipc.RunMonitorResponse
+	status     ipc.StatusResponse
+	statusErr  error
+	monitors   []ipc.MonitorResponse
+	monitor    ipc.MonitorResponse
+	incidents  []ipc.IncidentResponse
+	events     []ipc.EventResponse
+	checks     []ipc.CheckResultResponse
+	run        ipc.RunMonitorResponse
+	history    ipc.HistoryResponse
+	historyErr error
 }
 
 func (c stubClient) Status(context.Context) (ipc.StatusResponse, error) {
@@ -66,6 +68,10 @@ func (c stubClient) RunMonitor(context.Context, string) (ipc.RunMonitorResponse,
 
 func (c stubClient) RecentChecks(context.Context, string, int) ([]ipc.CheckResultResponse, error) {
 	return c.checks, nil
+}
+
+func (c stubClient) History(context.Context, string, string) (ipc.HistoryResponse, error) {
+	return c.history, c.historyErr
 }
 
 // TestIPCCmdSuccess verifies the async IPC command pattern (SPEC §19.3): a

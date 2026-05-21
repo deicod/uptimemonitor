@@ -27,6 +27,7 @@ type Client interface {
 	ListMonitorEvents(ctx context.Context, monitorID string) ([]ipc.EventResponse, error)
 	RunMonitor(ctx context.Context, monitorID string) (ipc.RunMonitorResponse, error)
 	RecentChecks(ctx context.Context, monitorID string, limit int) ([]ipc.CheckResultResponse, error)
+	History(ctx context.Context, monitorID, rangeStr string) (ipc.HistoryResponse, error)
 }
 
 var _ Client = (*ipc.Client)(nil)

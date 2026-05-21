@@ -26,6 +26,11 @@ type monitorEventsLoadedMsg struct{ events []ipc.EventResponse }
 // monitor on the detail screen (PLAN M7.8).
 type monitorChecksLoadedMsg struct{ checks []ipc.CheckResultResponse }
 
+// monitorHistoryLoadedMsg delivers the bucketed history for the monitor over
+// the screen's currently selected range (PLAN M8.5). The Range field on the
+// response is the canonical SPEC §14.5 window the service computed against.
+type monitorHistoryLoadedMsg struct{ history ipc.HistoryResponse }
+
 // detailRecentLimit caps the incident, event, and check lists rendered on the
 // detail screen so a long-running monitor does not flood the panel.
 const detailRecentLimit = 10
@@ -35,37 +40,63 @@ const detailRecentLimit = 10
 // without operator action (SPEC §10.5; PLAN M7.8).
 var monitorManualCheckKey = key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "check now"))
 
+// historyRanges lists the SPEC §14.5 windows offered by the detail screen's
+// range selector, in display order. The numeric key '1'..'5' selects the
+// corresponding entry (PLAN M8.5).
+var historyRanges = []string{"1h", "6h", "24h", "7d", "30d"}
+
+// defaultHistoryRange is the SPEC §14.5 window the detail screen loads on
+// first render. 24h is roughly the middle of the supported ranges and a
+// reasonable "what happened recently" default.
+const defaultHistoryRange = "24h"
+
+// historyRangeKey accepts a digit between '1' and '5' and selects the
+// corresponding entry from historyRanges. The binding is declared once so the
+// help text in View() stays in sync with the actual matching.
+var historyRangeKey = key.NewBinding(
+	key.WithKeys("1", "2", "3", "4", "5"),
+	key.WithHelp("1-5", "range"),
+)
+
 // monitorDetailScreen shows a single monitor's configuration, current state,
 // recent checks, incidents, and events (SPEC §12.2). It loads the monitor and
 // its incident/event history over IPC. History (M8) and the notification
 // summary (M9) are placeholders until those milestones land; current state and
 // recent checks become live in M7.8.
 type monitorDetailScreen struct {
-	client    Client
-	monitorID string
-	monitor   *ipc.MonitorResponse
-	incidents []ipc.IncidentResponse
-	events    []ipc.EventResponse
-	checks    []ipc.CheckResultResponse
+	client       Client
+	monitorID    string
+	monitor      *ipc.MonitorResponse
+	incidents    []ipc.IncidentResponse
+	events       []ipc.EventResponse
+	checks       []ipc.CheckResultResponse
+	history      *ipc.HistoryResponse
+	historyRange string
 }
 
 // newMonitorDetailScreen builds the detail screen for monitorID, bound to
-// client.
+// client. The history range starts at defaultHistoryRange; the numeric
+// range-selector keys mutate it (PLAN M8.5).
 func newMonitorDetailScreen(client Client, monitorID string) *monitorDetailScreen {
-	return &monitorDetailScreen{client: client, monitorID: monitorID}
+	return &monitorDetailScreen{
+		client:       client,
+		monitorID:    monitorID,
+		historyRange: defaultHistoryRange,
+	}
 }
 
 // Init fetches the monitor and its incidents and events concurrently
 // (SPEC §19.3).
 func (s *monitorDetailScreen) Init() tea.Cmd { return s.fetchAll() }
 
-// fetchAll batches the four independent IPC reads the screen needs.
+// fetchAll batches the independent IPC reads the screen needs.
 func (s *monitorDetailScreen) fetchAll() tea.Cmd {
 	return tea.Batch(
 		fetchMonitorCmd(s.client, s.monitorID),
 		fetchMonitorIncidentsCmd(s.client, s.monitorID),
 		fetchMonitorEventsCmd(s.client, s.monitorID),
 		fetchMonitorChecksCmd(s.client, s.monitorID, detailRecentLimit),
+		fetchMonitorHistoryCmd(s.client, s.monitorID, s.historyRange),
 	)
 }
 
@@ -81,12 +112,21 @@ func (s *monitorDetailScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.events = msg.events
 	case monitorChecksLoadedMsg:
 		s.checks = msg.checks
+	case monitorHistoryLoadedMsg:
+		h := msg.history
+		s.history = &h
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, monitorRefreshKey):
 			return s, s.fetchAll()
 		case key.Matches(msg, monitorManualCheckKey):
 			return s, s.runManualCheck()
+		case key.Matches(msg, historyRangeKey):
+			if idx := int(msg.Code - '1'); idx >= 0 && idx < len(historyRanges) {
+				s.historyRange = historyRanges[idx]
+				s.history = nil
+				return s, fetchMonitorHistoryCmd(s.client, s.monitorID, s.historyRange)
+			}
 		}
 	}
 	return s, nil
@@ -134,7 +174,7 @@ func (s *monitorDetailScreen) View() string {
 	fmt.Fprintf(&b, "config:    %s\n", configText(m.Config))
 
 	fmt.Fprintf(&b, "\nstate:     %s\n", liveState(m, s.checks))
-	b.WriteString("history:   (history shown from M8)\n")
+	b.WriteString(renderHistory(s.historyRange, s.history))
 	b.WriteString("notify:    (notification summary shown from M9)\n")
 
 	b.WriteString("\nrecent checks\n")
@@ -146,8 +186,48 @@ func (s *monitorDetailScreen) View() string {
 	b.WriteString("\nevents\n")
 	b.WriteString(renderEvents(s.events))
 
-	b.WriteString("\nr refresh • c check now • esc back")
+	b.WriteString("\nr refresh • c check now • 1-5 range • esc back")
 	return b.String()
+}
+
+// renderHistory builds the heartbeat-style history block for the detail
+// screen: a header naming the active range and resolution, followed by a row
+// of one glyph per bucket from oldest to newest (SPEC §19.5). The block
+// rendered before the history response arrives shows the active range plus a
+// loading marker, so the operator immediately sees which range will populate.
+func renderHistory(rangeStr string, h *ipc.HistoryResponse) string {
+	var b strings.Builder
+	if h == nil {
+		fmt.Fprintf(&b, "history:   %s (loading…)\n", rangeStr)
+		return b.String()
+	}
+	fmt.Fprintf(&b, "history:   %s, %s\n", h.Range, h.Resolution)
+	if len(h.Points) == 0 {
+		b.WriteString("           (no samples)\n")
+		return b.String()
+	}
+	b.WriteString("           ")
+	for _, p := range h.Points {
+		b.WriteRune(historyGlyph(p.State))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// historyGlyph maps a bucket state to its SPEC §19.5 heartbeat glyph. Unknown
+// inputs render as '?' so a future state added to the SPEC does not silently
+// vanish from the row.
+func historyGlyph(state string) rune {
+	switch state {
+	case "up":
+		return '▪'
+	case "down":
+		return 'x'
+	case "paused":
+		return '-'
+	default:
+		return '?'
+	}
 }
 
 // liveState returns the live state to render for the monitor: the most recent
@@ -279,5 +359,18 @@ func fetchMonitorChecksCmd(c Client, id string, limit int) tea.Cmd {
 			return c.RecentChecks(ctx, id, limit)
 		},
 		func(cs []ipc.CheckResultResponse) tea.Msg { return monitorChecksLoadedMsg{checks: cs} },
+	)
+}
+
+// fetchMonitorHistoryCmd fetches the bucketed history for a monitor over the
+// given range (SPEC §10.5, §14.5). The resulting message carries the typed
+// HistoryResponse so the detail screen can render glyphs and labels without
+// having to re-derive the resolution.
+func fetchMonitorHistoryCmd(c Client, id, rangeStr string) tea.Cmd {
+	return ipcCmd(
+		func(ctx context.Context) (ipc.HistoryResponse, error) {
+			return c.History(ctx, id, rangeStr)
+		},
+		func(h ipc.HistoryResponse) tea.Msg { return monitorHistoryLoadedMsg{history: h} },
 	)
 }
