@@ -619,7 +619,7 @@ M9.1–M9.4 are done.
   *Tests first:* each event type renders the expected text.
   *Context:* SPEC §18.2.
 
-- [ ] **M9.4 — Notification repositories (SQLite)** — *deps: M2.3, M4.1*
+- [x] **M9.4 — Notification repositories (SQLite)** — *deps: M2.3, M4.1*
   Implement `notification_targets` CRUD with soft-delete and `notification_attempts`
   insert / list-by-target (SPEC §12.3); never return secret fields by default;
   preserve a stored secret when an update leaves the field blank (SPEC §18.9).
