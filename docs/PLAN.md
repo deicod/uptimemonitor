@@ -599,7 +599,7 @@ Goal: the notification framework, all seven MVP providers, the delivery pipeline
 and TUI configuration. Tasks M9.5–M9.8 are independent and parallelizable once
 M9.1–M9.4 are done.
 
-- [ ] **M9.1 — Provider interface, fields & message model** — *deps: M3.1*
+- [x] **M9.1 — Provider interface, fields & message model** — *deps: M3.1*
   Add `internal/notify/provider.go` (`Provider`, `Field`, `FieldType`) and
   `internal/notify/message.go` (`Message`, MVP event types) per SPEC §18.1–18.2,
   §18.4.
