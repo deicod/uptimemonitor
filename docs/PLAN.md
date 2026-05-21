@@ -575,7 +575,7 @@ the TUI shows a heartbeat-style history view.
   `validation_error`; client decodes the response.
   *Context:* SPEC §10.5 (history), §14.5.
 
-- [ ] **M8.4 — Retention cleanup** — *deps: M8.1, M4.4*
+- [x] **M8.4 — Retention cleanup** — *deps: M8.1, M4.4*
   Add startup and periodic (1h) cleanup: TSDB raw-sample retention and SQLite
   `check_results` pruning at 30 days (SPEC §12.5, §14.4, §14.6); hook it into
   `internal/app/service.go`.

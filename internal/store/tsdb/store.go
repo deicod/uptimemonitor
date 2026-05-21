@@ -57,3 +57,17 @@ func (s *Store) Querier(mint, maxt int64) (storage.Querier, error) {
 func (s *Store) Close() error {
 	return s.db.Close()
 }
+
+// Cleanup compacts the TSDB and applies the configured retention by triggering
+// block compaction (SPEC §14.4, §14.6). The Prometheus TSDB's reloadBlocks step
+// deletes blocks whose max-time falls outside the configured retention window,
+// so calling Compact is sufficient to enforce raw-sample retention.
+//
+// Cleanup is safe to call concurrently with appends and reads; the TSDB takes
+// its own compaction mutex internally.
+func (s *Store) Cleanup(ctx context.Context) error {
+	if err := s.db.Compact(ctx); err != nil {
+		return fmt.Errorf("tsdb: compact for retention: %w", err)
+	}
+	return nil
+}

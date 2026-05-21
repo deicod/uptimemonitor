@@ -146,6 +146,42 @@ func TestServiceLifecycle(t *testing.T) {
 	}
 }
 
+// TestServiceFailsOnIPCBindReturnsWithoutHanging exercises the startupFailed
+// branch of Run: the IPC server cannot bind because the socket path is an
+// existing directory, but the parent ctx remains active. Run must still
+// return promptly. Without the retention cleaner being given a cancellable
+// sub-context, the deferred wait on the cleaner goroutine deadlocks because
+// the cleaner's hourly ticker only exits on ctx.Done().
+func TestServiceFailsOnIPCBindReturnsWithoutHanging(t *testing.T) {
+	cfg := testConfig(t)
+	// Pre-create the socket path as a directory so the IPC server's
+	// stale-socket cleanup fails and Start returns an error before
+	// listen ever succeeds — driving Run through startupFailed.
+	if err := os.MkdirAll(cfg.SocketPath, 0o755); err != nil {
+		t.Fatalf("pre-create socket dir: %v", err)
+	}
+	// Put a file inside so os.Remove on the directory fails.
+	if err := os.WriteFile(filepath.Join(cfg.SocketPath, "marker"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed dir: %v", err)
+	}
+
+	// Use a parent ctx that we do NOT cancel; the fix must not require it.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- app.Run(ctx, cfg) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Run returned nil despite IPC bind failure")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return within 10s — retention goroutine likely deadlocked the deferred wait")
+	}
+}
+
 // TestServiceFailsOnUnusableSocketDir verifies startup fails fast when a
 // required directory cannot be created, rather than reporting a false ready.
 func TestServiceFailsOnUnusableSocketDir(t *testing.T) {

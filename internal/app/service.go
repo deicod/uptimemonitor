@@ -17,6 +17,7 @@ import (
 	"github.com/deicod/uptimemonitor/internal/monitor"
 	"github.com/deicod/uptimemonitor/internal/pipeline"
 	"github.com/deicod/uptimemonitor/internal/probe"
+	"github.com/deicod/uptimemonitor/internal/retention"
 	"github.com/deicod/uptimemonitor/internal/scheduler"
 	"github.com/deicod/uptimemonitor/internal/store/sqlite"
 	"github.com/deicod/uptimemonitor/internal/store/tsdb"
@@ -27,6 +28,10 @@ import (
 // startupTimeout bounds how long Run waits for the IPC server to bind its
 // socket before treating startup as failed.
 const startupTimeout = 5 * time.Second
+
+// retentionInterval is the cadence of the retention loop that prunes
+// check_results and triggers TSDB compaction (SPEC §14.6).
+const retentionInterval = time.Hour
 
 // Run executes the service startup sequence (SPEC §9.1), serves IPC requests
 // until ctx is cancelled, then shuts down gracefully (SPEC §9.3).
@@ -105,6 +110,30 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// ticker immediately (the scheduler only schedules tickers after Start).
 	sched.Start(ctx)
 	defer sched.Stop()
+
+	// Run the retention loop alongside the scheduler. It prunes SQLite
+	// check_results past the 30-day SPEC §12.5 retention and triggers TSDB
+	// compaction so Prometheus-side retention applies (SPEC §14.4, §14.6).
+	//
+	// The cleaner gets its own cancellable context so the deferred wait
+	// always completes — including the startupFailed path, where the
+	// parent ctx is still active when Run unwinds. The single defer
+	// cancels and then waits so the goroutine never touches a store
+	// after the deferred Close calls run.
+	cleaner := retention.New(checkRepo, ts, retention.Options{
+		CheckResultRetention: 30 * 24 * time.Hour,
+		Interval:             retentionInterval,
+	}, logging.Component(logger, "retention"))
+	cleanerCtx, cancelCleaner := context.WithCancel(ctx)
+	retentionDone := make(chan struct{})
+	go func() {
+		cleaner.Start(cleanerCtx)
+		close(retentionDone)
+	}()
+	defer func() {
+		cancelCleaner()
+		<-retentionDone
+	}()
 
 	existing, err := monitorSvc.List(ctx, monitor.MonitorFilter{})
 	if err != nil {

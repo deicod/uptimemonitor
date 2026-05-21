@@ -191,3 +191,30 @@ func TestClose(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 }
+
+// TestCleanup confirms Cleanup runs successfully against an empty store and
+// against a store that has had samples appended. Cleanup is what the periodic
+// retention loop calls (SPEC §14.6); if it can't run without error the service
+// would log warnings forever, so this guards the basic contract.
+func TestCleanup(t *testing.T) {
+	store := openStore(t)
+
+	if err := store.Cleanup(context.Background()); err != nil {
+		t.Fatalf("Cleanup on empty store: %v", err)
+	}
+
+	// Append a sample and Cleanup again to confirm it remains safe with data
+	// in the head block.
+	app := store.Appender(context.Background())
+	if _, err := app.Append(0, labels.FromStrings("__name__", "x", "monitor_id", "m"),
+		time.Now().UnixMilli(), 1.0); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := app.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	if err := store.Cleanup(context.Background()); err != nil {
+		t.Fatalf("Cleanup after append: %v", err)
+	}
+}
