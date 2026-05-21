@@ -96,7 +96,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		startedAt: time.Now(),
 		logger:    logging.Component(logger, "status"),
 	}
-	router := ipc.NewRouter(provider, monitorSvc, incidentRepo, eventRepo)
+	router := ipc.NewRouter(provider, monitorSvc, incidentRepo, eventRepo,
+		ipc.WithManualChecker(sched), ipc.WithCheckResults(checkRepo))
 	server := ipc.NewServer(cfg.SocketPath, router)
 
 	// Start the scheduler before loading monitors so each Add starts its

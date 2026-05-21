@@ -76,3 +76,29 @@ func (c *Client) UpdateMonitor(ctx context.Context, id string, req UpdateMonitor
 func (c *Client) DeleteMonitor(ctx context.Context, id string) error {
 	return c.Do(ctx, http.MethodDelete, "/v1/monitors/"+url.PathEscape(id), nil, nil)
 }
+
+// RunMonitor enqueues a manual check via POST /v1/monitors/{id}/run (SPEC
+// §10.5). The response body's status is "queued" when the check has been
+// accepted for asynchronous execution.
+func (c *Client) RunMonitor(ctx context.Context, id string) (RunMonitorResponse, error) {
+	var resp RunMonitorResponse
+	if err := c.Do(ctx, http.MethodPost, "/v1/monitors/"+url.PathEscape(id)+"/run", nil, &resp); err != nil {
+		return RunMonitorResponse{}, err
+	}
+	return resp, nil
+}
+
+// RecentChecks fetches the most recent check_results for a monitor via
+// GET /v1/monitors/{id}/checks (SPEC §10.5). A non-positive limit omits the
+// query parameter and the server applies its default.
+func (c *Client) RecentChecks(ctx context.Context, id string, limit int) ([]CheckResultResponse, error) {
+	path := "/v1/monitors/" + url.PathEscape(id) + "/checks"
+	if limit > 0 {
+		path += "?limit=" + strconv.Itoa(limit)
+	}
+	var resp CheckResultListResponse
+	if err := c.Do(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Checks, nil
+}

@@ -11,7 +11,11 @@ import "net/http"
 // need just a subset (e.g. status-only tests) may pass nil. Additional routes
 // (notifications, etc.) are registered here as they are implemented in
 // subsequent milestones.
-func NewRouter(status StatusProvider, monitors MonitorService, incidents IncidentReader, events EventReader) *http.ServeMux {
+func NewRouter(status StatusProvider, monitors MonitorService, incidents IncidentReader, events EventReader, opts ...RouterOption) *http.ServeMux {
+	cfg := routerConfig{}
+	for _, o := range opts {
+		o(&cfg)
+	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /v1/status", StatusHandler(status))
 	if monitors != nil {
@@ -20,6 +24,12 @@ func NewRouter(status StatusProvider, monitors MonitorService, incidents Inciden
 		mux.Handle("GET /v1/monitors/{id}", getMonitorHandler(monitors))
 		mux.Handle("PATCH /v1/monitors/{id}", updateMonitorHandler(monitors))
 		mux.Handle("DELETE /v1/monitors/{id}", deleteMonitorHandler(monitors))
+		if cfg.checker != nil {
+			mux.Handle("POST /v1/monitors/{id}/run", runMonitorHandler(monitors, cfg.checker))
+		}
+		if cfg.checks != nil {
+			mux.Handle("GET /v1/monitors/{id}/checks", listMonitorChecksHandler(monitors, cfg.checks))
+		}
 	}
 	if incidents != nil {
 		mux.Handle("GET /v1/incidents", listIncidentsHandler(incidents))
@@ -30,4 +40,23 @@ func NewRouter(status StatusProvider, monitors MonitorService, incidents Inciden
 		mux.Handle("GET /v1/monitors/{id}/events", listMonitorEventsHandler(events))
 	}
 	return mux
+}
+
+// RouterOption customises NewRouter without expanding its positional argument
+// list every time a new endpoint group is added (M7.7 onwards).
+type RouterOption func(*routerConfig)
+
+type routerConfig struct {
+	checker ManualChecker
+	checks  CheckResultReader
+}
+
+// WithManualChecker registers POST /v1/monitors/{id}/run backed by checker.
+func WithManualChecker(checker ManualChecker) RouterOption {
+	return func(c *routerConfig) { c.checker = checker }
+}
+
+// WithCheckResults registers GET /v1/monitors/{id}/checks backed by repo.
+func WithCheckResults(repo CheckResultReader) RouterOption {
+	return func(c *routerConfig) { c.checks = repo }
 }

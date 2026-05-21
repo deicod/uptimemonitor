@@ -527,7 +527,7 @@ recorded, and manual checks work.
   incident + event; recovery → incident resolved + event.
   *Context:* SPEC §17.3, §16, §11.5–11.6.
 
-- [ ] **M7.7 — Manual-check & recent-checks IPC** — *deps: M7.6, M5.3*
+- [x] **M7.7 — Manual-check & recent-checks IPC** — *deps: M7.6, M5.3*
   Add `POST /v1/monitors/{id}/run` (queued response) and
   `GET /v1/monitors/{id}/checks?limit=` (SPEC §10.5) with client methods; allow
   manual checks for disabled monitors without unpausing them (SPEC §16.4).
