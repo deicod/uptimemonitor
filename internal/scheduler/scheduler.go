@@ -92,6 +92,13 @@ func (s *Scheduler) Start(ctx context.Context) {
 	}
 }
 
+// Running reports whether Start has been called and Stop has not. The status
+// endpoint uses it to surface the scheduler's liveness in /v1/status without
+// reaching into the Scheduler's private state.
+func (s *Scheduler) Running() bool {
+	return s.started.Load() && !s.stopped.Load()
+}
+
 // Stop cancels all per-monitor tickers, waits for them to exit, then waits
 // for the workers to finish their current jobs. After Stop the scheduler
 // cannot be restarted.

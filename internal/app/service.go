@@ -15,6 +15,9 @@ import (
 	"github.com/deicod/uptimemonitor/internal/ipc"
 	"github.com/deicod/uptimemonitor/internal/logging"
 	"github.com/deicod/uptimemonitor/internal/monitor"
+	"github.com/deicod/uptimemonitor/internal/pipeline"
+	"github.com/deicod/uptimemonitor/internal/probe"
+	"github.com/deicod/uptimemonitor/internal/scheduler"
 	"github.com/deicod/uptimemonitor/internal/store/sqlite"
 	"github.com/deicod/uptimemonitor/internal/store/tsdb"
 	"github.com/deicod/uptimemonitor/internal/systemd"
@@ -55,18 +58,59 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 	defer closeStore(logger, "tsdb", ts.Close)
 
-	provider := &statusProvider{
-		sqlite:    sq,
-		startedAt: time.Now(),
-	}
 	eventRepo := sqlite.NewEventRepo(sq)
+	stateRepo := sqlite.NewMonitorStateRepo(sq)
+	incidentRepo := sqlite.NewIncidentRepo(sq)
+	checkRepo := sqlite.NewCheckResultRepo(sq)
+
 	monitorSvc := monitor.NewService(
 		sqlite.NewMonitorRepo(sq),
-		sqlite.NewMonitorStateRepo(sq),
+		stateRepo,
 		eventRepo,
 	)
-	router := ipc.NewRouter(provider, monitorSvc, sqlite.NewIncidentRepo(sq), eventRepo)
+	pipe := pipeline.New(probe.NewDispatcher(), checkRepo, stateRepo, eventRepo, incidentRepo,
+		logging.Component(logger, "pipeline"))
+	sched := scheduler.New(pipe.Run, cfg.Service.CheckWorkers)
+
+	// The OnChange observer keeps the scheduler's per-monitor schedule in sync
+	// with monitor lifecycle events (M5.1, M7.5): deletes remove the entry,
+	// every other change re-registers the (possibly updated) monitor so its
+	// ticker is started, stopped, or rescheduled per its current enabled flag
+	// and interval.
+	monitorSvc.OnChange = func(c monitor.Change) {
+		if c.Monitor == nil {
+			return
+		}
+		if c.Kind == monitor.ChangeDeleted {
+			sched.Remove(c.Monitor.ID)
+			return
+		}
+		sched.Add(*c.Monitor)
+	}
+
+	provider := &statusProvider{
+		sqlite:    sq,
+		scheduler: sched,
+		monitors:  monitorSvc,
+		workers:   cfg.Service.CheckWorkers,
+		startedAt: time.Now(),
+		logger:    logging.Component(logger, "status"),
+	}
+	router := ipc.NewRouter(provider, monitorSvc, incidentRepo, eventRepo)
 	server := ipc.NewServer(cfg.SocketPath, router)
+
+	// Start the scheduler before loading monitors so each Add starts its
+	// ticker immediately (the scheduler only schedules tickers after Start).
+	sched.Start(ctx)
+	defer sched.Stop()
+
+	existing, err := monitorSvc.List(ctx, monitor.MonitorFilter{})
+	if err != nil {
+		return fmt.Errorf("load existing monitors: %w", err)
+	}
+	for _, m := range existing {
+		sched.Add(*m)
+	}
 
 	// The server is given its own cancellable context so every return path —
 	// including a failed or aborted startup — stops the goroutine and lets it
@@ -207,11 +251,14 @@ func socketExists(path string) bool {
 }
 
 // statusProvider implements ipc.StatusProvider, backing GET /v1/status with the
-// service's live view of itself. The scheduler is not yet wired (M7); until
-// then it reports as not running.
+// service's live view of itself.
 type statusProvider struct {
 	sqlite    *sqlite.Store
+	scheduler *scheduler.Scheduler
+	monitors  *monitor.Service
+	workers   int
 	startedAt time.Time
+	logger    *slog.Logger
 }
 
 // Status returns the current service status snapshot (SPEC §10.5).
@@ -222,7 +269,26 @@ func (p *statusProvider) Status(ctx context.Context) ipc.StatusResponse {
 		StartedAt: p.startedAt,
 		SQLite:    ipc.StoreHealth{OK: p.sqlite.DB().PingContext(ctx) == nil},
 		TSDB:      ipc.StoreHealth{OK: true},
-		Scheduler: ipc.SchedulerStatus{Running: false, Workers: 0},
-		Monitors:  ipc.MonitorCounts{},
+		Scheduler: ipc.SchedulerStatus{Running: p.scheduler.Running(), Workers: p.workers},
+		Monitors:  p.monitorCounts(ctx),
 	}
+}
+
+// monitorCounts counts active (enabled, non-deleted) monitors and the total of
+// non-deleted monitors for the /v1/status payload. A list error is logged and
+// reported as zero counts rather than failing the status call, because /v1/status
+// is a liveness probe and must always respond.
+func (p *statusProvider) monitorCounts(ctx context.Context) ipc.MonitorCounts {
+	all, err := p.monitors.List(ctx, monitor.MonitorFilter{})
+	if err != nil {
+		p.logger.Error("list monitors for status", "error", err.Error())
+		return ipc.MonitorCounts{}
+	}
+	counts := ipc.MonitorCounts{Total: len(all)}
+	for _, m := range all {
+		if m.Enabled {
+			counts.Active++
+		}
+	}
+	return counts
 }

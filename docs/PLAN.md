@@ -518,7 +518,7 @@ recorded, and manual checks work.
   per monitor; manual trigger runs; schedule updates apply.
   *Context:* SPEC §16.
 
-- [ ] **M7.6 — Check pipeline integration** — *deps: M7.3, M7.4, M7.5, M4.4, M4.5*
+- [x] **M7.6 — Check pipeline integration** — *deps: M7.3, M7.4, M7.5, M4.4, M4.5*
   Wire scheduler → dispatcher → persistence: store `check_results`, update
   `monitor_states` (consecutive counters), apply the state machine, write events,
   and open/resolve incidents (SPEC §17.3). Register the scheduler as the monitor

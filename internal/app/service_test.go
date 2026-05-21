@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -81,6 +82,51 @@ func TestServiceLifecycle(t *testing.T) {
 	}
 	if !status.TSDB.OK {
 		t.Error("status.TSDB.OK = false, want true")
+	}
+	// The scheduler must be reported as running once startup has reached
+	// "ready"; otherwise the check pipeline is not wired and monitors created
+	// over IPC would never be probed (M7.6).
+	if !status.Scheduler.Running {
+		t.Error("status.Scheduler.Running = false, want true")
+	}
+	if status.Scheduler.Workers != cfg.Service.CheckWorkers {
+		t.Errorf("status.Scheduler.Workers = %d, want %d",
+			status.Scheduler.Workers, cfg.Service.CheckWorkers)
+	}
+	// A fresh service has no monitors; both counts must start at zero or the
+	// status endpoint would mislead operators.
+	if status.Monitors.Total != 0 || status.Monitors.Active != 0 {
+		t.Errorf("initial status.Monitors = %+v, want zero counts", status.Monitors)
+	}
+
+	// Creating one enabled monitor must lift Total and Active in /v1/status —
+	// this exercises the live monitor.Service → statusProvider wiring.
+	cfgJSON, err := json.Marshal(map[string]any{
+		"url":                 "https://example.com",
+		"method":              "GET",
+		"expected_status_min": 200,
+		"expected_status_max": 299,
+	})
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if _, err := client.CreateMonitor(context.Background(), ipc.CreateMonitorRequest{
+		Name:                 "Example",
+		Type:                 "http",
+		Enabled:              true,
+		Interval:             ipc.Duration(60 * time.Second),
+		Timeout:              ipc.Duration(10 * time.Second),
+		Config:               cfgJSON,
+		NotificationsEnabled: true,
+	}); err != nil {
+		t.Fatalf("CreateMonitor: %v", err)
+	}
+	after, err := client.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status after create: %v", err)
+	}
+	if after.Monitors.Total != 1 || after.Monitors.Active != 1 {
+		t.Errorf("after create, status.Monitors = %+v, want {Total:1 Active:1}", after.Monitors)
 	}
 
 	// Simulate SIGTERM: cancelling ctx triggers graceful shutdown.
