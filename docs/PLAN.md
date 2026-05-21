@@ -606,7 +606,7 @@ M9.1–M9.4 are done.
   *Tests first:* field-type constants; message construction helpers.
   *Context:* SPEC §18.1–18.2, §18.4.
 
-- [ ] **M9.2 — Registry & provider-metadata endpoint** — *deps: M9.1, M3.2*
+- [x] **M9.2 — Registry & provider-metadata endpoint** — *deps: M9.1, M3.2*
   Add `internal/notify/registry.go` and `GET /v1/notifications/providers` (SPEC
   §18.3, §10.5) with a client method.
   *Tests first:* register/lookup; unknown kind → error; the endpoint returns field

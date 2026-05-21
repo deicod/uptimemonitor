@@ -42,6 +42,9 @@ func NewRouter(status StatusProvider, monitors MonitorService, incidents Inciden
 		mux.Handle("GET /v1/events", listEventsHandler(events))
 		mux.Handle("GET /v1/monitors/{id}/events", listMonitorEventsHandler(events))
 	}
+	if cfg.notifications != nil {
+		mux.Handle("GET /v1/notifications/providers", listProvidersHandler(cfg.notifications))
+	}
 	return mux
 }
 
@@ -50,9 +53,10 @@ func NewRouter(status StatusProvider, monitors MonitorService, incidents Inciden
 type RouterOption func(*routerConfig)
 
 type routerConfig struct {
-	checker ManualChecker
-	checks  CheckResultReader
-	history HistoryReader
+	checker       ManualChecker
+	checks        CheckResultReader
+	history       HistoryReader
+	notifications NotificationProviderRegistry
 }
 
 // WithManualChecker registers POST /v1/monitors/{id}/run backed by checker.
@@ -68,4 +72,11 @@ func WithCheckResults(repo CheckResultReader) RouterOption {
 // WithHistory registers GET /v1/monitors/{id}/history backed by reader.
 func WithHistory(reader HistoryReader) RouterOption {
 	return func(c *routerConfig) { c.history = reader }
+}
+
+// WithNotificationRegistry registers GET /v1/notifications/providers backed
+// by reg. Subsequent notification endpoints (M9.10) will piggy-back on the
+// same registry-driven wiring.
+func WithNotificationRegistry(reg NotificationProviderRegistry) RouterOption {
+	return func(c *routerConfig) { c.notifications = reg }
 }
