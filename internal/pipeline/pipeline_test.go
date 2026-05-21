@@ -7,12 +7,14 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/deicod/uptimemonitor/internal/monitor"
 	"github.com/deicod/uptimemonitor/internal/pipeline"
 	"github.com/deicod/uptimemonitor/internal/store/sqlite"
+	"github.com/deicod/uptimemonitor/internal/store/tsdb"
 )
 
 // discardLogger returns a logger that drops every record. Tests don't assert
@@ -37,6 +39,7 @@ type fakeProber struct {
 type probeOutcome struct {
 	success bool
 	errStr  string
+	status  *int
 }
 
 func (f *fakeProber) Dispatch(_ context.Context, m monitor.Monitor) (monitor.CheckResult, error) {
@@ -54,14 +57,38 @@ func (f *fakeProber) Dispatch(_ context.Context, m monitor.Monitor) (monitor.Che
 func (f *fakeProber) next(out probeOutcome, m monitor.Monitor) monitor.CheckResult {
 	now := time.Now().UTC()
 	return monitor.CheckResult{
-		ID:         monitor.NewID(),
-		MonitorID:  m.ID,
-		StartedAt:  now,
-		FinishedAt: now,
-		Duration:   5 * time.Millisecond,
-		Success:    out.success,
-		Error:      out.errStr,
+		ID:             monitor.NewID(),
+		MonitorID:      m.ID,
+		StartedAt:      now,
+		FinishedAt:     now,
+		Duration:       5 * time.Millisecond,
+		Success:        out.success,
+		Error:          out.errStr,
+		HTTPStatusCode: out.status,
 	}
+}
+
+// fakeSampleWriter records every CheckSample the pipeline writes so tests can
+// assert that TSDB samples are produced per check. It satisfies
+// pipeline.SampleWriter without needing a real TSDB on disk.
+type fakeSampleWriter struct {
+	mu      sync.Mutex
+	samples []tsdb.CheckSample
+}
+
+func (f *fakeSampleWriter) WriteCheck(_ context.Context, s tsdb.CheckSample) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.samples = append(f.samples, s)
+	return nil
+}
+
+func (f *fakeSampleWriter) Samples() []tsdb.CheckSample {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]tsdb.CheckSample, len(f.samples))
+	copy(out, f.samples)
+	return out
 }
 
 // pipelineFixture bundles everything an integration test needs: an open,
@@ -72,6 +99,7 @@ type pipelineFixture struct {
 	svc      *monitor.Service
 	pipeline *pipeline.Pipeline
 	prober   *fakeProber
+	samples  *fakeSampleWriter
 }
 
 func newFixture(t *testing.T) *pipelineFixture {
@@ -94,9 +122,10 @@ func newFixture(t *testing.T) *pipelineFixture {
 
 	svc := monitor.NewService(monitors, states, events)
 	prober := &fakeProber{}
-	p := pipeline.New(prober, checks, states, events, incidents, discardLogger())
+	samples := &fakeSampleWriter{}
+	p := pipeline.New(prober, checks, states, events, incidents, samples, discardLogger())
 
-	return &pipelineFixture{store: store, svc: svc, pipeline: p, prober: prober}
+	return &pipelineFixture{store: store, svc: svc, pipeline: p, prober: prober, samples: samples}
 }
 
 // createMonitor seeds an enabled HTTP monitor through the real monitor.Service
@@ -372,5 +401,63 @@ func TestPipeline_SteadyStateNoOp(t *testing.T) {
 	}
 	if stateChanges != 1 {
 		t.Errorf("monitor_state_changed events = %d, want 1 (only the first up transition)", stateChanges)
+	}
+}
+
+// TestPipeline_WritesTSDBSamplesPerCheck covers SPEC §14.2–14.3: every check
+// must produce a TSDB sample labelled with the monitor's id and type. Without
+// this, the history view (M8.5) would have no raw data to plot. The fakeProber
+// installs a deterministic HTTP status so the test can also assert that the
+// status code carries through to the sample (and is dropped on transport
+// failure in a sibling test).
+func TestPipeline_WritesTSDBSamplesPerCheck(t *testing.T) {
+	f := newFixture(t)
+	m := f.createMonitor(t)
+	ctx := context.Background()
+
+	status := 200
+	f.prober.queue = []probeOutcome{{success: true, status: &status}}
+	f.pipeline.Run(ctx, *m, false)
+
+	got := f.samples.Samples()
+	if len(got) != 1 {
+		t.Fatalf("samples written = %d, want 1", len(got))
+	}
+	s := got[0]
+	if s.MonitorID != m.ID {
+		t.Errorf("sample.MonitorID = %q, want %q", s.MonitorID, m.ID)
+	}
+	if s.MonitorType != string(monitor.MonitorTypeHTTP) {
+		t.Errorf("sample.MonitorType = %q, want %q", s.MonitorType, monitor.MonitorTypeHTTP)
+	}
+	if !s.Success {
+		t.Errorf("sample.Success = false, want true")
+	}
+	if s.HTTPStatusCode == nil || *s.HTTPStatusCode != 200 {
+		t.Errorf("sample.HTTPStatusCode = %v, want 200", s.HTTPStatusCode)
+	}
+}
+
+// TestPipeline_FailedCheckSampleHasNoStatus covers the SPEC §14.3 rule that a
+// failed check without an HTTP status must omit the status field — the
+// pipeline forwards the probe's nil HTTPStatusCode untouched so the TSDB
+// writer can suppress the status series.
+func TestPipeline_FailedCheckSampleHasNoStatus(t *testing.T) {
+	f := newFixture(t)
+	m := f.createMonitor(t)
+	ctx := context.Background()
+
+	f.prober.queue = []probeOutcome{{success: false, errStr: "dial tcp: timeout"}}
+	f.pipeline.Run(ctx, *m, false)
+
+	got := f.samples.Samples()
+	if len(got) != 1 {
+		t.Fatalf("samples written = %d, want 1", len(got))
+	}
+	if got[0].HTTPStatusCode != nil {
+		t.Errorf("sample.HTTPStatusCode = %v, want nil for transport failure", *got[0].HTTPStatusCode)
+	}
+	if got[0].Success {
+		t.Errorf("sample.Success = true, want false")
 	}
 }

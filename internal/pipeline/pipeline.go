@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/deicod/uptimemonitor/internal/monitor"
+	"github.com/deicod/uptimemonitor/internal/store/tsdb"
 )
 
 // Prober executes one probe for a monitor and returns the observation as a
@@ -52,6 +53,12 @@ type IncidentRepo interface {
 	FindOpenByMonitor(ctx context.Context, monitorID string) (*monitor.Incident, error)
 }
 
+// SampleWriter persists per-check time-series samples to the TSDB
+// (SPEC §14.2–14.3). *tsdb.Store satisfies it.
+type SampleWriter interface {
+	WriteCheck(ctx context.Context, sample tsdb.CheckSample) error
+}
+
 // Pipeline executes one check and persists every consequence (SPEC §17.3): a
 // check_result row, the new monitor_states row, a monitor_state_changed event
 // on transitions, and the matching incident_opened / incident_resolved event
@@ -63,13 +70,14 @@ type Pipeline struct {
 	states    StateRepo
 	events    EventRepo
 	incidents IncidentRepo
+	samples   SampleWriter
 	logger    *slog.Logger
 }
 
 // New builds a Pipeline. All dependencies are required; the pipeline does no
 // I/O until Run is called. A nil logger falls back to slog.Default so the
 // pipeline always has somewhere to surface persistence errors.
-func New(prober Prober, checks CheckResultRepo, states StateRepo, events EventRepo, incidents IncidentRepo, logger *slog.Logger) *Pipeline {
+func New(prober Prober, checks CheckResultRepo, states StateRepo, events EventRepo, incidents IncidentRepo, samples SampleWriter, logger *slog.Logger) *Pipeline {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -79,6 +87,7 @@ func New(prober Prober, checks CheckResultRepo, states StateRepo, events EventRe
 		states:    states,
 		events:    events,
 		incidents: incidents,
+		samples:   samples,
 		logger:    logger,
 	}
 }
@@ -144,6 +153,23 @@ func (p *Pipeline) run(ctx context.Context, m monitor.Monitor) error {
 
 	if err := p.checks.Insert(ctx, &cr); err != nil {
 		return fmt.Errorf("pipeline: insert check_result: %w", err)
+	}
+
+	// TSDB write is best-effort: SQLite is the authoritative record for state,
+	// events, and incidents (SPEC §12, §14.1). A TSDB failure must not block
+	// state transitions, so we log and continue rather than return.
+	if err := p.samples.WriteCheck(ctx, tsdb.CheckSample{
+		MonitorID:      m.ID,
+		MonitorType:    string(m.Type),
+		FinishedAt:     now,
+		Success:        cr.Success,
+		Duration:       cr.Duration,
+		HTTPStatusCode: cr.HTTPStatusCode,
+	}); err != nil {
+		p.logger.Error("write tsdb samples",
+			"monitor_id", m.ID,
+			"error", err.Error(),
+		)
 	}
 
 	if transition.EmitStateChange {

@@ -68,7 +68,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		stateRepo,
 		eventRepo,
 	)
-	pipe := pipeline.New(probe.NewDispatcher(), checkRepo, stateRepo, eventRepo, incidentRepo,
+	pipe := pipeline.New(probe.NewDispatcher(), checkRepo, stateRepo, eventRepo, incidentRepo, ts,
 		logging.Component(logger, "pipeline"))
 	sched := scheduler.New(pipe.Run, cfg.Service.CheckWorkers)
 

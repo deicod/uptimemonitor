@@ -551,7 +551,7 @@ recorded, and manual checks work.
 Goal: time-series samples are written, history is queryable, retention runs, and
 the TUI shows a heartbeat-style history view.
 
-- [ ] **M8.1 — TSDB sample writes** — *deps: M7.6, M2.4*
+- [x] **M8.1 — TSDB sample writes** — *deps: M7.6, M2.4*
   Add `internal/store/tsdb/series.go`: write `uptimemonitor_probe_success`,
   `uptimemonitor_probe_duration_seconds`, and `uptimemonitor_probe_http_status_code`
   with `monitor_id`/`monitor_type` labels (SPEC §14.2–14.3; omit the status sample

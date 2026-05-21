@@ -14,7 +14,14 @@ import (
 	"github.com/deicod/uptimemonitor/internal/pipeline"
 	"github.com/deicod/uptimemonitor/internal/scheduler"
 	"github.com/deicod/uptimemonitor/internal/store/sqlite"
+	"github.com/deicod/uptimemonitor/internal/store/tsdb"
 )
+
+// noopSamples discards TSDB writes. The IPC manual-check test only asserts
+// SQLite-side state, so a real TSDB on disk would be wasteful overhead.
+type noopSamples struct{}
+
+func (noopSamples) WriteCheck(context.Context, tsdb.CheckSample) error { return nil }
 
 // fakeProber is a pipeline.Prober that always returns a successful synthetic
 // check, so the integration test does not need a real HTTP target.
@@ -62,6 +69,7 @@ func TestManualCheckDisabledMonitorOverIPC(t *testing.T) {
 	svc := monitor.NewService(monitorRepo, stateRepo, eventRepo)
 	prober := &fakeProber{}
 	pipe := pipeline.New(prober, checkRepo, stateRepo, eventRepo, incidentRepo,
+		noopSamples{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	sched := scheduler.New(pipe.Run, 2)
 

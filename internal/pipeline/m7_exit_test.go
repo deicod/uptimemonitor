@@ -102,6 +102,7 @@ func TestM7ExitCheck(t *testing.T) {
 		sqlite.NewMonitorStateRepo(f.store),
 		sqlite.NewEventRepo(f.store),
 		sqlite.NewIncidentRepo(f.store),
+		&fakeSampleWriter{},
 		discardLogger(),
 	)
 
