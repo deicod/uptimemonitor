@@ -88,6 +88,18 @@ func (c *Client) RunMonitor(ctx context.Context, id string) (RunMonitorResponse,
 	return resp, nil
 }
 
+// History fetches a monitor's time-series history via
+// GET /v1/monitors/{id}/history?range= (SPEC §10.5). The range must be in the
+// SPEC §14.5 supported set; the server returns a validation_error otherwise.
+func (c *Client) History(ctx context.Context, id, rangeStr string) (HistoryResponse, error) {
+	path := "/v1/monitors/" + url.PathEscape(id) + "/history?range=" + url.QueryEscape(rangeStr)
+	var resp HistoryResponse
+	if err := c.Do(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return HistoryResponse{}, err
+	}
+	return resp, nil
+}
+
 // RecentChecks fetches the most recent check_results for a monitor via
 // GET /v1/monitors/{id}/checks (SPEC §10.5). A non-positive limit omits the
 // query parameter and the server applies its default.

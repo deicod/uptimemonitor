@@ -568,7 +568,7 @@ the TUI shows a heartbeat-style history view.
   and aggregates.
   *Context:* SPEC §14.5, §10.5 (history); §6 decision 3.
 
-- [ ] **M8.3 — History IPC endpoint + client** — *deps: M8.2, M5.3*
+- [x] **M8.3 — History IPC endpoint + client** — *deps: M8.2, M5.3*
   Add `GET /v1/monitors/{id}/history?range=&resolution=` (SPEC §10.5) validating
   the range against the supported set, with a client method.
   *Tests first:* handler maps ranges → resolutions; invalid range →

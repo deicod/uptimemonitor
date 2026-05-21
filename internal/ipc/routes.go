@@ -30,6 +30,9 @@ func NewRouter(status StatusProvider, monitors MonitorService, incidents Inciden
 		if cfg.checks != nil {
 			mux.Handle("GET /v1/monitors/{id}/checks", listMonitorChecksHandler(monitors, cfg.checks))
 		}
+		if cfg.history != nil {
+			mux.Handle("GET /v1/monitors/{id}/history", listMonitorHistoryHandler(monitors, cfg.history))
+		}
 	}
 	if incidents != nil {
 		mux.Handle("GET /v1/incidents", listIncidentsHandler(incidents))
@@ -49,6 +52,7 @@ type RouterOption func(*routerConfig)
 type routerConfig struct {
 	checker ManualChecker
 	checks  CheckResultReader
+	history HistoryReader
 }
 
 // WithManualChecker registers POST /v1/monitors/{id}/run backed by checker.
@@ -59,4 +63,9 @@ func WithManualChecker(checker ManualChecker) RouterOption {
 // WithCheckResults registers GET /v1/monitors/{id}/checks backed by repo.
 func WithCheckResults(repo CheckResultReader) RouterOption {
 	return func(c *routerConfig) { c.checks = repo }
+}
+
+// WithHistory registers GET /v1/monitors/{id}/history backed by reader.
+func WithHistory(reader HistoryReader) RouterOption {
+	return func(c *routerConfig) { c.history = reader }
 }
