@@ -560,7 +560,7 @@ the TUI shows a heartbeat-style history view.
   the status series.
   *Context:* SPEC §14.2–14.3.
 
-- [ ] **M8.2 — TSDB history queries & aggregation** — *deps: M8.1*
+- [x] **M8.2 — TSDB history queries & aggregation** — *deps: M8.1*
   Add `internal/store/tsdb/query.go`: a range query bucketed to the resolution
   for each range (SPEC §14.5), producing history points (`state`,
   `success_ratio`, `avg_duration_ms`).
