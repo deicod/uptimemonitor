@@ -627,7 +627,7 @@ M9.1–M9.4 are done.
   update preserves the stored secret.
   *Context:* SPEC §12.3, §18.9.
 
-- [ ] **M9.5 — Fake + HTTP-webhook-family providers** — *deps: M9.1*
+- [x] **M9.5 — Fake + HTTP-webhook-family providers** — *deps: M9.1*
   Add `internal/notify/providers/`: `fake` (records sends, for tests), `webhook`,
   `discord`, and `slack` — JSON-over-HTTP `POST` (SPEC §18.5).
   *Tests first:* each `Validate` rejects missing required fields; each `Send` posts

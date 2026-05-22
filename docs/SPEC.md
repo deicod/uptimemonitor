@@ -115,8 +115,10 @@ Recommended initial layout:
 │   │   └── providers/
 │   │       ├── discord/
 │   │       ├── email/
+│   │       ├── fake/
 │   │       ├── gotify/
 │   │       ├── ntfy/
+│   │       ├── providerhttp/
 │   │       ├── slack/
 │   │       ├── telegram/
 │   │       └── webhook/
