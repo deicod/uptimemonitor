@@ -640,7 +640,7 @@ M9.1–M9.4 are done.
   handling.
   *Context:* SPEC §18.5 (ntfy, gotify).
 
-- [ ] **M9.7 — Telegram provider** — *deps: M9.1*
+- [x] **M9.7 — Telegram provider** — *deps: M9.1*
   Add `providers/telegram` (bot `sendMessage`, SPEC §18.5).
   *Tests first:* `Validate` and `Send` via `httptest`.
   *Context:* SPEC §18.5 (telegram).
