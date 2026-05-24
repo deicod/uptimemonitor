@@ -6,7 +6,7 @@
 # time (see deployments/ko/README.md). The image is distroless and runs as a
 # non-root user; the SQLite driver and TSDB are pure Go, so the binary is built
 # static with CGO disabled.
-defaultBaseImage: gcr.io/distroless/static-debian12:nonroot
+defaultBaseImage: gcr.io/distroless/static-debian13:nonroot
 
 builds:
   - id: uptimemonitor
