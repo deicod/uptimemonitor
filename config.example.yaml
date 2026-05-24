@@ -1,0 +1,60 @@
+# Uptime Monitor example configuration (SPEC §8).
+#
+# Every value below is also the built-in default, so this file documents the
+# effective configuration even if you delete keys you do not need. Copy it to
+# the discovered location and edit as required:
+#
+#   sudo install -D -m 0640 config.example.yaml /etc/uptimemonitor/config.yaml
+#
+# The service searches /etc/uptimemonitor/config.yaml when --config is not given.
+#
+# Every key can be overridden by an environment variable with the
+# UPTIMEMONITOR_ prefix; nested keys join with underscores (SPEC §8.4):
+#
+#   UPTIMEMONITOR_LOG_LEVEL=debug
+#   UPTIMEMONITOR_SOCKET_PATH=/run/uptimemonitor/uptimemonitor.sock
+#   UPTIMEMONITOR_SECRET=...
+#   UPTIMEMONITOR_SERVICE_CHECK_WORKERS=16
+#   UPTIMEMONITOR_NOTIFICATIONS_ENABLED=true
+#
+# Precedence, lowest to highest: defaults < this file < environment < flags.
+
+# Filesystem layout. Under systemd, StateDirectory/RuntimeDirectory create and
+# own data_dir and runtime_dir for you (see deployments/systemd).
+data_dir: /var/lib/uptimemonitor
+runtime_dir: /run/uptimemonitor
+sqlite_path: /var/lib/uptimemonitor/config.db
+tsdb_path: /var/lib/uptimemonitor/tsdb
+socket_path: /run/uptimemonitor/uptimemonitor.sock
+
+# Log level: debug, info, warn, or error.
+log_level: info
+
+# Reserved for a future web UI/API. Not required by the TUI and never logged
+# (SPEC §20.2). Leave empty unless you have a reason to set it.
+secret: ""
+
+service:
+  # Bounded worker pool for concurrent probes.
+  check_workers: 16
+  # Default probe interval for new monitors.
+  default_interval: 60s
+  # Per-probe timeout. Must be shorter than default_interval.
+  timeout: 10s
+  # Grace period for in-flight checks on shutdown.
+  shutdown_timeout: 10s
+
+retention:
+  # Raw per-check samples (TSDB) and SQLite check_results retention.
+  # Accepts h/m/s plus the d (day) and w (week) suffixes.
+  raw_samples: 30d
+  # Horizon for on-demand aggregated history queries.
+  aggregated_history: 365d
+
+notifications:
+  # Global on/off switch for down/recovery notifications.
+  enabled: true
+  # Delivery attempts before giving up, with bounded exponential backoff.
+  max_attempts: 3
+  initial_retry_delay: 5s
+  max_retry_delay: 60s

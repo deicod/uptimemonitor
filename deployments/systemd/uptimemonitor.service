@@ -1,0 +1,25 @@
+[Unit]
+Description=Uptime Monitor
+Documentation=https://github.com/deicod/uptimemonitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=uptimemonitor
+Group=uptimemonitor
+ExecStart=/usr/bin/uptimemonitor service --config /etc/uptimemonitor/config.yaml
+Restart=on-failure
+RestartSec=5s
+WatchdogSec=30s
+RuntimeDirectory=uptimemonitor
+StateDirectory=uptimemonitor
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/uptimemonitor /run/uptimemonitor
+
+[Install]
+WantedBy=multi-user.target

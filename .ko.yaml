@@ -1,0 +1,23 @@
+# ko build configuration (SPEC §22). `make ko-build` (or `ko build --local .`)
+# produces a container image whose entrypoint is the uptimemonitor binary.
+#
+# ko cannot bake a subcommand into the image — the compiled binary is always the
+# entrypoint with an empty CMD — so the `service` argument is supplied at run
+# time (see deployments/ko/README.md). The image is distroless and runs as a
+# non-root user; the SQLite driver and TSDB are pure Go, so the binary is built
+# static with CGO disabled.
+defaultBaseImage: gcr.io/distroless/static-debian12:nonroot
+
+builds:
+  - id: uptimemonitor
+    main: .
+    env:
+      - CGO_ENABLED=0
+    # Version metadata is injected the same way `make build` does it
+    # (internal/version). Tag-less repositories build cleanly: only the always
+    # available commit and build date are templated, so Version stays "dev".
+    ldflags:
+      - -s
+      - -w
+      - -X github.com/deicod/uptimemonitor/internal/version.Commit={{.Git.ShortCommit}}
+      - -X github.com/deicod/uptimemonitor/internal/version.Date={{.Date}}

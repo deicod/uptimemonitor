@@ -17,6 +17,10 @@ LDFLAGS := -X $(VERSION_PKG).Version=$(VERSION) \
 MIGRATIONS_DIR := internal/store/sqlite/migrations
 NAME ?=
 
+# Container build. Override to push to a registry, e.g.
+# `KO_DOCKER_REPO=ghcr.io/you/uptimemonitor make ko-build`.
+KO_DOCKER_REPO ?= ko.local
+
 .PHONY: all build test vet fmt lint tidy \
         migrate-new migrate-validate migrate-apply ko-build clean help
 
@@ -59,9 +63,9 @@ migrate-validate:
 migrate-apply:
 	atlas migrate apply --env local
 
-## ko-build: build a container image locally with ko.
+## ko-build: build a container image locally with ko (override KO_DOCKER_REPO to push).
 ko-build:
-	KO_DOCKER_REPO=ko.local ko build --local .
+	KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko build --local .
 
 ## clean: remove build artifacts.
 clean:

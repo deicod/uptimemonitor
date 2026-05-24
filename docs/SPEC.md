@@ -1,8 +1,8 @@
 # Uptime Monitor Technical Specification
 
 Status: Draft  
-Version: 0.2  
-Date: 2026-05-18  
+Version: 0.3  
+Date: 2026-05-24  
 Repository: `github.com/deicod/uptimemonitor`  
 License: MIT  
 Derived from: `docs/PRD.md` version 0.2  
@@ -1652,11 +1652,19 @@ If watchdog support is enabled by systemd, the service should periodically repor
 
 ### 22.1 Image entrypoint
 
-The ko-built image should run:
+ko sets the image entrypoint to the compiled `uptimemonitor` binary and leaves
+the container command empty; it has no mechanism to bake in a subcommand. The
+service is therefore selected by supplying `service` as the runtime argument,
+not by the image alone:
 
 ```text
-uptimemonitor service
+docker run <image> service
 ```
+
+In an orchestrator, pass it as the container arguments (for example, Kubernetes
+`args: ["service"]`) and leave the command unset so ko's binary entrypoint is
+preserved. The deployment behaviour is equivalent to running
+`uptimemonitor service`.
 
 ### 22.2 Persistence
 
@@ -1904,4 +1912,8 @@ An implementation satisfies this SPEC when:
       duration decode hook for day and week suffixes (§8). Specified embedded,
       in-process migration application at startup with no runtime dependency on
       the atlas binary (§13). Corrected the ko build path (§25).
+0.3 - Clarified the ko image entrypoint (§22.1): ko sets the binary as the
+      container entrypoint with an empty command, so the `service` subcommand is
+      supplied as a runtime argument by the deployment rather than baked into
+      the image.
 ```

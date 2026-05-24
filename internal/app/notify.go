@@ -24,10 +24,10 @@ import (
 const settingNotificationsEnabled = "notifications_enabled"
 
 // buildNotifyRegistry constructs the provider registry with every MVP provider
-// (SPEC §18.3). The fake provider is test-only and is deliberately excluded.
-func buildNotifyRegistry() (*notify.Registry, error) {
-	reg := notify.NewRegistry()
-	for _, p := range []notify.Provider{
+// (SPEC §18.3). The fake provider is test-only and is never registered in
+// production; the end-to-end test supplies it through extra (app.WithProviders).
+func buildNotifyRegistry(extra ...notify.Provider) (*notify.Registry, error) {
+	providers := []notify.Provider{
 		webhook.New(),
 		discord.New(),
 		slack.New(),
@@ -35,7 +35,10 @@ func buildNotifyRegistry() (*notify.Registry, error) {
 		gotify.New(),
 		telegram.New(),
 		email.New(),
-	} {
+	}
+	providers = append(providers, extra...)
+	reg := notify.NewRegistry()
+	for _, p := range providers {
 		if err := reg.Register(p); err != nil {
 			return nil, err
 		}

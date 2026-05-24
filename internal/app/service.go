@@ -34,6 +34,26 @@ const startupTimeout = 5 * time.Second
 // check_results and triggers TSDB compaction (SPEC §14.6).
 const retentionInterval = time.Hour
 
+// Option customises the service constructed by Run. Production callers
+// (cmd/service.go) pass none; the end-to-end smoke test (SPEC §24.4) uses
+// WithProviders to inject the fake recording provider.
+type Option func(*options)
+
+// options holds the resolved Option values applied at the start of Run.
+type options struct {
+	extraProviders []notify.Provider
+}
+
+// WithProviders registers notification providers in addition to the MVP set
+// (SPEC §18.3). It exists so the end-to-end test can inject the fake provider
+// and assert a delivery attempt without real network I/O; a duplicate kind makes
+// Run fail at registry construction.
+func WithProviders(providers ...notify.Provider) Option {
+	return func(o *options) {
+		o.extraProviders = append(o.extraProviders, providers...)
+	}
+}
+
 // Run executes the service startup sequence (SPEC §9.1), serves IPC requests
 // until ctx is cancelled, then shuts down gracefully (SPEC §9.3).
 //
@@ -41,7 +61,12 @@ const retentionInterval = time.Hour
 // until shutdown is complete and returns nil on a clean stop — including when
 // the shutdown signal arrives mid-startup. Stores are closed in reverse open
 // order (TSDB then SQLite) on every return path.
-func Run(ctx context.Context, cfg *config.Config) error {
+func Run(ctx context.Context, cfg *config.Config, opts ...Option) error {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	logger := logging.Component(logging.New(cfg.LogLevel, os.Stderr), "service")
 
 	if err := ensureDirs(cfg); err != nil {
@@ -80,7 +105,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// delivery pipeline fans incident notifications out to enabled targets
 	// (SPEC §18). The same registry drives the IPC providers endpoint and the
 	// target repo's secret redaction (SPEC §18.9).
-	notifyReg, err := buildNotifyRegistry()
+	notifyReg, err := buildNotifyRegistry(o.extraProviders...)
 	if err != nil {
 		return fmt.Errorf("build notification registry: %w", err)
 	}

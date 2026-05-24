@@ -693,13 +693,13 @@ M9.1–M9.4 are done.
 Goal: the project is installable, runnable under systemd, containerizable with ko,
 and verified end to end.
 
-- [ ] **M10.1 — systemd unit** — *deps: M3.6*
+- [x] **M10.1 — systemd unit** — *deps: M3.6*
   Add `deployments/systemd/uptimemonitor.service` (SPEC §21.1) with the hardening
   directives; confirm `Type=notify` matches M3.5.
   *Tests first:* n/a — manual-verify note that the service starts under systemd.
   *Context:* SPEC §21.
 
-- [ ] **M10.2 — ko container build** — *deps: M3.6*
+- [x] **M10.2 — ko container build** — *deps: M3.6*
   Add ko configuration (`.ko.yaml`), `deployments/ko/README.md`, and a
   `make ko-build` target; the image entrypoint is `uptimemonitor service` (SPEC
   §22). Document the container Unix-socket caveat.
@@ -707,19 +707,19 @@ and verified end to end.
   service.
   *Context:* SPEC §22; §6 decision 6.
 
-- [ ] **M10.3 — Example config & config docs** — *deps: M1.2*
+- [x] **M10.3 — Example config & config docs** — *deps: M1.2*
   Add an example `config.yaml` (SPEC §8.1) and document environment variables and
   default paths.
   *Tests first:* n/a — verify the example loads and validates.
   *Context:* SPEC §8.
 
-- [ ] **M10.4 — README completion & install/run docs** — *deps: M10.1, M10.2, M10.3*
+- [x] **M10.4 — README completion & install/run docs** — *deps: M10.1, M10.2, M10.3*
   Complete `README.md`: install, systemd setup, TUI usage, container usage, and a
   config reference.
   *Tests first:* n/a — verify documented commands.
   *Context:* PRD §7, §19; SPEC §21–22.
 
-- [ ] **M10.5 — End-to-end smoke test** — *deps: M9.11*
+- [x] **M10.5 — End-to-end smoke test** — *deps: M9.11*
   Implement SPEC §24.4: start the service with temp directories, create a monitor
   over IPC, run a local test HTTP server, trigger a manual check → `up`, stop the
   server, trigger a check → `down`, and assert a notification attempt via the fake
@@ -727,7 +727,7 @@ and verified end to end.
   *Tests first:* the smoke test itself is the test.
   *Context:* SPEC §24.4.
 
-- [ ] **M10.6 — Acceptance verification** — *deps: M10.1–M10.5*
+- [x] **M10.6 — Acceptance verification** — *deps: M10.1–M10.5*
   Walk the full SPEC §28 and PRD §19 checklists, fix any gaps, and confirm all
   `make` quality gates and CI are green. Mark all M10 tasks complete.
 
