@@ -650,7 +650,7 @@ M9.1–M9.4 are done.
   *Tests first:* `Validate`; `Send` against an in-process SMTP test server.
   *Context:* SPEC §18.5 (email).
 
-- [ ] **M9.9 — Delivery pipeline, retry & spam control** — *deps: M9.2, M9.3, M9.4*
+- [x] **M9.9 — Delivery pipeline, retry & spam control** — *deps: M9.2, M9.3, M9.4*
   Add `internal/notify/delivery.go`: an in-memory job queue with workers, loading
   of enabled targets, send via provider, attempt recording, bounded exponential
   backoff (SPEC §18.7), one-down/one-recovery per incident (SPEC §18.8), no retry
