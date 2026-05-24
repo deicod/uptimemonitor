@@ -659,7 +659,7 @@ M9.1–M9.4 are done.
   spam rule prevents repeat down notifications; manual tests are not retried.
   *Context:* SPEC §18.6–18.9; §6 decision 4.
 
-- [ ] **M9.10 — Notification IPC endpoints + client** — *deps: M9.9, M5.3*
+- [x] **M9.10 — Notification IPC endpoints + client** — *deps: M9.9, M5.3*
   Add notification-target CRUD, `POST /v1/notifications/targets/{id}/test`, and
   `GET /v1/notifications/attempts` (SPEC §10.5) with client methods; secrets are
   never returned.
@@ -667,7 +667,7 @@ M9.1–M9.4 are done.
   the fake provider.
   *Context:* SPEC §10.5 (notifications), §18.9.
 
-- [ ] **M9.11 — Wire notifications into state transitions** — *deps: M9.9, M7.6*
+- [x] **M9.11 — Wire notifications into state transitions** — *deps: M9.9, M7.6*
   In the check pipeline, queue `monitor_down` on incident open and
   `monitor_recovered` on resolve, respecting the global toggle (settings), the
   per-monitor `notifications_enabled` flag, and per-target `enabled`.
@@ -675,7 +675,7 @@ M9.1–M9.4 are done.
   attempt; disabled monitor or global toggle off → no attempt.
   *Context:* SPEC §17.3, §18.6, §18.8; PRD §11.7; §6 decision 5.
 
-- [ ] **M9.12 — TUI notification screens** — *deps: M9.10, M6.6*
+- [x] **M9.12 — TUI notification screens** — *deps: M9.10, M6.6*
   Add a notification-target list, a provider-driven target form (fields from
   `/v1/notifications/providers`, secrets shown as set/unset), an attempts list, a
   global enable toggle, delete-with-confirm, and send-test (SPEC §12.4, §18.9).
@@ -683,7 +683,7 @@ M9.1–M9.4 are done.
   test-send and delete flows work.
   *Context:* SPEC §12.4, §18.4, §18.9.
 
-- [ ] **M9.13 — M9 exit check** — *deps: M9.1–M9.12*
+- [x] **M9.13 — M9 exit check** — *deps: M9.1–M9.12*
   Verify (SPEC §28): a user can configure MVP providers in the TUI, send test
   notifications, and receive down/recovery notifications once per incident
   lifecycle. Mark all M9 tasks complete.

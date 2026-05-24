@@ -22,6 +22,14 @@ var homeMonitorsKey = key.NewBinding(
 	key.WithHelp("m", "monitors"),
 )
 
+// homeNotificationsKey opens the notification target list, the entry point to
+// the notification center: from there the operator reaches the attempts list
+// and the global enable toggle (SPEC §12.4, §18.9).
+var homeNotificationsKey = key.NewBinding(
+	key.WithKeys("N"),
+	key.WithHelp("N", "notifications"),
+)
+
 // homeStatusLoadedMsg delivers the service status fetched by the home screen.
 type homeStatusLoadedMsg struct{ status ipc.StatusResponse }
 
@@ -55,6 +63,8 @@ func (s *homeScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, PushScreen(newStatusScreen(s.client))
 		case key.Matches(msg, homeMonitorsKey):
 			return s, PushScreen(newMonitorListScreen(s.client))
+		case key.Matches(msg, homeNotificationsKey):
+			return s, PushScreen(newNotificationTargetListScreen(s.client))
 		}
 	}
 	return s, nil

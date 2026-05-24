@@ -100,6 +100,40 @@ func TestRegistryListEmpty(t *testing.T) {
 	}
 }
 
+// TestRegistrySecretFields verifies SecretFields reports exactly the field
+// names a provider marks secret, derived from its Fields() metadata. The
+// notification target repository (M9.4) consumes this as its SecretFieldsFunc
+// to redact secrets on read and preserve them on a blank update (SPEC §18.9);
+// deriving the list from the provider keeps it from drifting out of sync with
+// the provider's own declared fields.
+func TestRegistrySecretFields(t *testing.T) {
+	reg := NewRegistry()
+	if err := reg.Register(&fakeProvider{
+		kind: "demo",
+		fields: []Field{
+			{Name: "url", Type: FieldTypeString},
+			{Name: "token", Type: FieldTypeSecretString, Secret: true},
+			{Name: "password", Type: FieldTypeSecretString, Secret: true},
+		},
+	}); err != nil {
+		t.Fatalf("Register demo: %v", err)
+	}
+	if err := reg.Register(&fakeProvider{kind: "plain", fields: []Field{{Name: "url"}}}); err != nil {
+		t.Fatalf("Register plain: %v", err)
+	}
+
+	got := reg.SecretFields("demo")
+	if len(got) != 2 || got[0] != "token" || got[1] != "password" {
+		t.Errorf("SecretFields(demo) = %v, want [token password]", got)
+	}
+	if got := reg.SecretFields("plain"); len(got) != 0 {
+		t.Errorf("SecretFields(plain) = %v, want empty", got)
+	}
+	if got := reg.SecretFields("unknown"); got != nil {
+		t.Errorf("SecretFields(unknown) = %v, want nil", got)
+	}
+}
+
 // TestRegistryListOrdered pins that List returns providers in deterministic
 // (kind-sorted) order. The wire response uses this order, and an unsorted
 // map iteration would make the providers endpoint flaky for any TUI or

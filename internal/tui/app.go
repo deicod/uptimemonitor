@@ -28,6 +28,17 @@ type Client interface {
 	RunMonitor(ctx context.Context, monitorID string) (ipc.RunMonitorResponse, error)
 	RecentChecks(ctx context.Context, monitorID string, limit int) ([]ipc.CheckResultResponse, error)
 	History(ctx context.Context, monitorID, rangeStr string) (ipc.HistoryResponse, error)
+
+	NotificationProviders(ctx context.Context) ([]ipc.NotificationProviderResponse, error)
+	ListNotificationTargets(ctx context.Context) ([]ipc.NotificationTargetResponse, error)
+	GetNotificationTarget(ctx context.Context, id string) (ipc.NotificationTargetResponse, error)
+	CreateNotificationTarget(ctx context.Context, req ipc.CreateNotificationTargetRequest) (ipc.NotificationTargetResponse, error)
+	UpdateNotificationTarget(ctx context.Context, id string, req ipc.UpdateNotificationTargetRequest) (ipc.NotificationTargetResponse, error)
+	DeleteNotificationTarget(ctx context.Context, id string) error
+	TestNotificationTarget(ctx context.Context, id string) (ipc.TestNotificationResponse, error)
+	ListNotificationAttempts(ctx context.Context, limit int) ([]ipc.NotificationAttemptResponse, error)
+	GetNotificationsEnabled(ctx context.Context) (bool, error)
+	SetNotificationsEnabled(ctx context.Context, enabled bool) (bool, error)
 }
 
 var _ Client = (*ipc.Client)(nil)

@@ -50,6 +50,25 @@ func (r *Registry) Lookup(kind string) (Provider, error) {
 	return p, nil
 }
 
+// SecretFields returns the names of the fields kind marks as secret, derived
+// from the provider's Fields() metadata. An unknown kind yields nil. The
+// notification target repository (M9.4) takes this as its SecretFieldsFunc, so
+// secret redaction (SPEC §18.9) always tracks the provider's declared fields
+// rather than a hand-maintained duplicate list.
+func (r *Registry) SecretFields(kind string) []string {
+	p, ok := r.providers[kind]
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, f := range p.Fields() {
+		if f.Secret {
+			out = append(out, f.Name)
+		}
+	}
+	return out
+}
+
 // List returns the registered providers sorted by Kind. The IPC providers
 // endpoint and the TUI provider-picker depend on a deterministic order;
 // returning an empty (non-nil) slice keeps JSON encoding stable too.

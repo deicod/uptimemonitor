@@ -45,6 +45,23 @@ func NewRouter(status StatusProvider, monitors MonitorService, incidents Inciden
 	if cfg.notifications != nil {
 		mux.Handle("GET /v1/notifications/providers", listProvidersHandler(cfg.notifications))
 	}
+	if cfg.targets != nil {
+		mux.Handle("GET /v1/notifications/targets", listTargetsHandler(cfg.targets))
+		mux.Handle("POST /v1/notifications/targets", createTargetHandler(cfg.targets))
+		mux.Handle("GET /v1/notifications/targets/{id}", getTargetHandler(cfg.targets))
+		mux.Handle("PATCH /v1/notifications/targets/{id}", updateTargetHandler(cfg.targets))
+		mux.Handle("DELETE /v1/notifications/targets/{id}", deleteTargetHandler(cfg.targets))
+		if cfg.tester != nil {
+			mux.Handle("POST /v1/notifications/targets/{id}/test", testTargetHandler(cfg.targets, cfg.tester))
+		}
+	}
+	if cfg.attempts != nil {
+		mux.Handle("GET /v1/notifications/attempts", listAttemptsHandler(cfg.attempts))
+	}
+	if cfg.settings != nil {
+		mux.Handle("GET /v1/notifications/settings", getNotificationSettingsHandler(cfg.settings))
+		mux.Handle("PUT /v1/notifications/settings", updateNotificationSettingsHandler(cfg.settings))
+	}
 	return mux
 }
 
@@ -57,6 +74,10 @@ type routerConfig struct {
 	checks        CheckResultReader
 	history       HistoryReader
 	notifications NotificationProviderRegistry
+	targets       NotificationTargetStore
+	attempts      NotificationAttemptReader
+	tester        NotificationTester
+	settings      NotificationSettingStore
 }
 
 // WithManualChecker registers POST /v1/monitors/{id}/run backed by checker.
@@ -75,8 +96,33 @@ func WithHistory(reader HistoryReader) RouterOption {
 }
 
 // WithNotificationRegistry registers GET /v1/notifications/providers backed
-// by reg. Subsequent notification endpoints (M9.10) will piggy-back on the
-// same registry-driven wiring.
+// by reg.
 func WithNotificationRegistry(reg NotificationProviderRegistry) RouterOption {
 	return func(c *routerConfig) { c.notifications = reg }
+}
+
+// WithNotificationTargets registers the notification-target CRUD endpoints
+// (GET/POST /v1/notifications/targets and GET/PATCH/DELETE .../{id}) backed by
+// store (M9.10). The test endpoint is mounted only when WithNotificationTester
+// is also supplied, since that handler must first load the target.
+func WithNotificationTargets(store NotificationTargetStore) RouterOption {
+	return func(c *routerConfig) { c.targets = store }
+}
+
+// WithNotificationTester registers POST /v1/notifications/targets/{id}/test
+// backed by tester (M9.10). It has no effect without WithNotificationTargets.
+func WithNotificationTester(tester NotificationTester) RouterOption {
+	return func(c *routerConfig) { c.tester = tester }
+}
+
+// WithNotificationAttempts registers GET /v1/notifications/attempts backed by
+// repo (M9.10).
+func WithNotificationAttempts(repo NotificationAttemptReader) RouterOption {
+	return func(c *routerConfig) { c.attempts = repo }
+}
+
+// WithNotificationSettings registers GET/PUT /v1/notifications/settings backed
+// by store, exposing the runtime global notifications toggle (M9.12).
+func WithNotificationSettings(store NotificationSettingStore) RouterOption {
+	return func(c *routerConfig) { c.settings = store }
 }

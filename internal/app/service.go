@@ -15,6 +15,7 @@ import (
 	"github.com/deicod/uptimemonitor/internal/ipc"
 	"github.com/deicod/uptimemonitor/internal/logging"
 	"github.com/deicod/uptimemonitor/internal/monitor"
+	"github.com/deicod/uptimemonitor/internal/notify"
 	"github.com/deicod/uptimemonitor/internal/pipeline"
 	"github.com/deicod/uptimemonitor/internal/probe"
 	"github.com/deicod/uptimemonitor/internal/retention"
@@ -73,8 +74,32 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		stateRepo,
 		eventRepo,
 	)
+
+	// Notification stack: the registry resolves a target's kind to its provider,
+	// the target/attempt repos persist config and the delivery audit log, and the
+	// delivery pipeline fans incident notifications out to enabled targets
+	// (SPEC §18). The same registry drives the IPC providers endpoint and the
+	// target repo's secret redaction (SPEC §18.9).
+	notifyReg, err := buildNotifyRegistry()
+	if err != nil {
+		return fmt.Errorf("build notification registry: %w", err)
+	}
+	targetRepo := sqlite.NewNotificationTargetRepo(sq, notifyReg.SecretFields)
+	attemptRepo := sqlite.NewNotificationAttemptRepo(sq)
+	notifier := notify.NewPipeline(notifyReg, targetRepo, attemptRepo, notify.RetryConfig{
+		MaxAttempts:       cfg.Notifications.MaxAttempts,
+		InitialRetryDelay: cfg.Notifications.InitialRetryDelay,
+		MaxRetryDelay:     cfg.Notifications.MaxRetryDelay,
+	}, logging.Component(logger, "notify"))
+	notifyGate := &notificationGate{
+		settings: sqlite.NewSettingsRepo(sq),
+		fallback: cfg.Notifications.Enabled,
+		logger:   logging.Component(logger, "notify"),
+	}
+
 	pipe := pipeline.New(probe.NewDispatcher(), checkRepo, stateRepo, eventRepo, incidentRepo, ts,
-		logging.Component(logger, "pipeline"))
+		logging.Component(logger, "pipeline"),
+		pipeline.WithNotifications(notifier, notifyGate))
 	sched := scheduler.New(pipe.Run, cfg.Service.CheckWorkers)
 
 	// The OnChange observer keeps the scheduler's per-monitor schedule in sync
@@ -103,8 +128,21 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 	router := ipc.NewRouter(provider, monitorSvc, incidentRepo, eventRepo,
 		ipc.WithManualChecker(sched), ipc.WithCheckResults(checkRepo),
-		ipc.WithHistory(ts))
+		ipc.WithHistory(ts),
+		ipc.WithNotificationRegistry(notifyReg),
+		ipc.WithNotificationTargets(targetRepo),
+		ipc.WithNotificationTester(notifier),
+		ipc.WithNotificationAttempts(attemptRepo),
+		ipc.WithNotificationSettings(notifyGate))
 	server := ipc.NewServer(cfg.SocketPath, router)
+
+	// Start notification delivery before the scheduler so a check that opens an
+	// incident on the first tick has workers ready to deliver. The deferred
+	// Stop is registered before the scheduler's so, on shutdown, the scheduler
+	// stops issuing checks first and the notifier drains afterwards while the
+	// stores it writes attempts to are still open (SPEC §9.3).
+	notifier.Start(ctx)
+	defer notifier.Stop()
 
 	// Start the scheduler before loading monitors so each Add starts its
 	// ticker immediately (the scheduler only schedules tickers after Start).

@@ -564,6 +564,76 @@ func TestNotificationAttemptRepoOptionalRefs(t *testing.T) {
 	}
 }
 
+// TestNotificationAttemptRepoListRecent verifies attempts from every target
+// come back newest-first, capped by limit. The global
+// GET /v1/notifications/attempts endpoint (M9.10) shows deliveries across all
+// targets, so the repo needs an all-targets reader distinct from ListByTarget;
+// a per-target reader could not back that endpoint without N round-trips.
+func TestNotificationAttemptRepoListRecent(t *testing.T) {
+	store := openMigrated(t)
+	ctx := context.Background()
+	targetA := insertTarget(t, store)
+	targetB := insertTarget(t, store)
+	repo := NewNotificationAttemptRepo(store)
+
+	base := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+	// Interleave the two targets so a correct result can't be produced by
+	// grouping per target — ordering must be purely by created_at.
+	specs := []struct {
+		target string
+		offset time.Duration
+	}{
+		{targetA, 1 * time.Minute},
+		{targetB, 2 * time.Minute},
+		{targetA, 3 * time.Minute},
+	}
+	var ids []string
+	for i, s := range specs {
+		a := &notify.Attempt{
+			ID:            monitor.NewID(),
+			TargetID:      s.target,
+			EventType:     notify.EventMonitorDown,
+			Status:        notify.AttemptStatusFailure,
+			AttemptNumber: 1,
+			CreatedAt:     base.Add(s.offset),
+		}
+		if err := repo.Insert(ctx, a); err != nil {
+			t.Fatalf("Insert %d: %v", i, err)
+		}
+		ids = append(ids, a.ID)
+	}
+
+	got, err := repo.ListRecent(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListRecent: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("ListRecent returned %d, want 3", len(got))
+	}
+	// Newest first regardless of target: specs[2], specs[1], specs[0].
+	for i, id := range []string{ids[2], ids[1], ids[0]} {
+		if got[i].ID != id {
+			t.Errorf("position %d = %s, want %s", i, got[i].ID, id)
+		}
+	}
+
+	limited, err := repo.ListRecent(ctx, 2)
+	if err != nil {
+		t.Fatalf("ListRecent(limit=2): %v", err)
+	}
+	if len(limited) != 2 {
+		t.Errorf("ListRecent(limit=2) returned %d, want 2", len(limited))
+	}
+
+	all, err := repo.ListRecent(ctx, 0)
+	if err != nil {
+		t.Fatalf("ListRecent(limit=0): %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("ListRecent(limit=0) returned %d, want 3", len(all))
+	}
+}
+
 // insertTarget persists a sample notification target so attempts can satisfy
 // the target_id foreign key.
 func insertTarget(t *testing.T, store *Store) string {

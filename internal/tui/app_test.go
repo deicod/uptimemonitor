@@ -26,6 +26,13 @@ type stubClient struct {
 	run        ipc.RunMonitorResponse
 	history    ipc.HistoryResponse
 	historyErr error
+
+	providers            []ipc.NotificationProviderResponse
+	targets              []ipc.NotificationTargetResponse
+	target               ipc.NotificationTargetResponse
+	attempts             []ipc.NotificationAttemptResponse
+	notificationsEnabled bool
+	testResp             ipc.TestNotificationResponse
 }
 
 func (c stubClient) Status(context.Context) (ipc.StatusResponse, error) {
@@ -72,6 +79,44 @@ func (c stubClient) RecentChecks(context.Context, string, int) ([]ipc.CheckResul
 
 func (c stubClient) History(context.Context, string, string) (ipc.HistoryResponse, error) {
 	return c.history, c.historyErr
+}
+
+func (c stubClient) NotificationProviders(context.Context) ([]ipc.NotificationProviderResponse, error) {
+	return c.providers, nil
+}
+
+func (c stubClient) ListNotificationTargets(context.Context) ([]ipc.NotificationTargetResponse, error) {
+	return c.targets, nil
+}
+
+func (c stubClient) GetNotificationTarget(context.Context, string) (ipc.NotificationTargetResponse, error) {
+	return c.target, nil
+}
+
+func (stubClient) CreateNotificationTarget(context.Context, ipc.CreateNotificationTargetRequest) (ipc.NotificationTargetResponse, error) {
+	return ipc.NotificationTargetResponse{}, nil
+}
+
+func (stubClient) UpdateNotificationTarget(context.Context, string, ipc.UpdateNotificationTargetRequest) (ipc.NotificationTargetResponse, error) {
+	return ipc.NotificationTargetResponse{}, nil
+}
+
+func (stubClient) DeleteNotificationTarget(context.Context, string) error { return nil }
+
+func (c stubClient) TestNotificationTarget(context.Context, string) (ipc.TestNotificationResponse, error) {
+	return c.testResp, nil
+}
+
+func (c stubClient) ListNotificationAttempts(context.Context, int) ([]ipc.NotificationAttemptResponse, error) {
+	return c.attempts, nil
+}
+
+func (c stubClient) GetNotificationsEnabled(context.Context) (bool, error) {
+	return c.notificationsEnabled, nil
+}
+
+func (c stubClient) SetNotificationsEnabled(_ context.Context, enabled bool) (bool, error) {
+	return enabled, nil
 }
 
 // TestIPCCmdSuccess verifies the async IPC command pattern (SPEC §19.3): a

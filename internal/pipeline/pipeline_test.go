@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/deicod/uptimemonitor/internal/monitor"
+	"github.com/deicod/uptimemonitor/internal/notify"
+	fakeprov "github.com/deicod/uptimemonitor/internal/notify/providers/fake"
 	"github.com/deicod/uptimemonitor/internal/pipeline"
 	"github.com/deicod/uptimemonitor/internal/store/sqlite"
 	"github.com/deicod/uptimemonitor/internal/store/tsdb"
@@ -102,7 +104,7 @@ type pipelineFixture struct {
 	samples  *fakeSampleWriter
 }
 
-func newFixture(t *testing.T) *pipelineFixture {
+func newFixture(t *testing.T, opts ...pipeline.Option) *pipelineFixture {
 	t.Helper()
 
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "pipeline.db"))
@@ -123,9 +125,196 @@ func newFixture(t *testing.T) *pipelineFixture {
 	svc := monitor.NewService(monitors, states, events)
 	prober := &fakeProber{}
 	samples := &fakeSampleWriter{}
-	p := pipeline.New(prober, checks, states, events, incidents, samples, discardLogger())
+	p := pipeline.New(prober, checks, states, events, incidents, samples, discardLogger(), opts...)
 
 	return &pipelineFixture{store: store, svc: svc, pipeline: p, prober: prober, samples: samples}
+}
+
+// fakeNotifier records enqueued jobs synchronously so the gating tests can
+// assert exactly when the pipeline decides to notify, without the async
+// delivery worker pool in the picture.
+type fakeNotifier struct {
+	mu   sync.Mutex
+	jobs []notify.Job
+}
+
+func (n *fakeNotifier) Enqueue(job notify.Job) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.jobs = append(n.jobs, job)
+}
+
+func (n *fakeNotifier) Jobs() []notify.Job {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	out := make([]notify.Job, len(n.jobs))
+	copy(out, n.jobs)
+	return out
+}
+
+// fakeGate is a constant global notifications toggle.
+type fakeGate struct{ enabled bool }
+
+func (g fakeGate) NotificationsEnabled(context.Context) bool { return g.enabled }
+
+// waitForSends polls the fake provider until it has recorded at least want
+// sends or the deadline passes. Delivery runs on the notify pipeline's worker
+// pool, so the assertion has to wait for the async hand-off.
+func waitForSends(t *testing.T, fp *fakeprov.Provider, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(fp.Sends()) >= want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("expected at least %d sends, got %d within timeout", want, len(fp.Sends()))
+}
+
+// TestPipeline_QueuesDownAndRecoveryNotifications covers the SPEC §17.3 wiring:
+// a down transition queues a monitor_down job linked to the freshly-opened
+// incident, and the recovery queues a monitor_recovered job against that same
+// incident. The link matters because the delivery pipeline keys spam
+// suppression on (incident, event type) (SPEC §18.8).
+func TestPipeline_QueuesDownAndRecoveryNotifications(t *testing.T) {
+	notifier := &fakeNotifier{}
+	f := newFixture(t, pipeline.WithNotifications(notifier, fakeGate{enabled: true}))
+	m := f.createMonitor(t)
+	ctx := context.Background()
+
+	f.prober.queue = []probeOutcome{{success: false, errStr: "boom"}, {success: true}}
+	f.pipeline.Run(ctx, *m, false) // down
+	f.pipeline.Run(ctx, *m, false) // recovery
+
+	jobs := notifier.Jobs()
+	if len(jobs) != 2 {
+		t.Fatalf("jobs = %d, want 2 (down + recovery)", len(jobs))
+	}
+	down := jobs[0]
+	if down.Message.EventType != notify.EventMonitorDown {
+		t.Errorf("job[0] type = %q, want %q", down.Message.EventType, notify.EventMonitorDown)
+	}
+	if down.IncidentID == "" || down.EventID == "" {
+		t.Errorf("down job missing incident/event link: %+v", down)
+	}
+	if down.Message.MonitorID != m.ID || down.Message.MonitorName != m.Name {
+		t.Errorf("down job message identity = %+v, want id=%s name=%s", down.Message, m.ID, m.Name)
+	}
+	rec := jobs[1]
+	if rec.Message.EventType != notify.EventMonitorRecovered {
+		t.Errorf("job[1] type = %q, want %q", rec.Message.EventType, notify.EventMonitorRecovered)
+	}
+	if rec.IncidentID != down.IncidentID {
+		t.Errorf("recovery incident = %q, want same as down %q", rec.IncidentID, down.IncidentID)
+	}
+}
+
+// TestPipeline_NoNotificationOnFirstSuccess pins that unknown→up neither opens
+// an incident nor notifies (SPEC §17.3 "unknown -> up").
+func TestPipeline_NoNotificationOnFirstSuccess(t *testing.T) {
+	notifier := &fakeNotifier{}
+	f := newFixture(t, pipeline.WithNotifications(notifier, fakeGate{enabled: true}))
+	m := f.createMonitor(t)
+
+	f.prober.queue = []probeOutcome{{success: true}}
+	f.pipeline.Run(context.Background(), *m, false)
+
+	if jobs := notifier.Jobs(); len(jobs) != 0 {
+		t.Errorf("jobs on unknown→up = %d, want 0", len(jobs))
+	}
+}
+
+// TestPipeline_NoNotificationWhenMonitorDisabled covers the per-monitor opt-out
+// (SPEC §18.6, §6 decision 5): a monitor with NotificationsEnabled=false still
+// transitions and opens incidents but must not enqueue notifications.
+func TestPipeline_NoNotificationWhenMonitorDisabled(t *testing.T) {
+	notifier := &fakeNotifier{}
+	f := newFixture(t, pipeline.WithNotifications(notifier, fakeGate{enabled: true}))
+	m := f.createMonitor(t)
+	m.NotificationsEnabled = false
+
+	f.prober.queue = []probeOutcome{{success: false, errStr: "boom"}}
+	f.pipeline.Run(context.Background(), *m, false)
+
+	if jobs := notifier.Jobs(); len(jobs) != 0 {
+		t.Errorf("jobs for notifications-disabled monitor = %d, want 0", len(jobs))
+	}
+}
+
+// TestPipeline_NoNotificationWhenGloballyDisabled covers the global toggle
+// (SPEC §18.6): with the gate closed, no transition notifies.
+func TestPipeline_NoNotificationWhenGloballyDisabled(t *testing.T) {
+	notifier := &fakeNotifier{}
+	f := newFixture(t, pipeline.WithNotifications(notifier, fakeGate{enabled: false}))
+	m := f.createMonitor(t)
+
+	f.prober.queue = []probeOutcome{{success: false, errStr: "boom"}}
+	f.pipeline.Run(context.Background(), *m, false)
+
+	if jobs := notifier.Jobs(); len(jobs) != 0 {
+		t.Errorf("jobs with global toggle off = %d, want 0", len(jobs))
+	}
+}
+
+// TestPipeline_DeliversToFakeProviderAndRecordsAttempt is the M9.11 end-to-end
+// check: a down then recovery transition, run through the real notify delivery
+// pipeline, reaches the fake provider and records one attempt per delivery.
+func TestPipeline_DeliversToFakeProviderAndRecordsAttempt(t *testing.T) {
+	f := newFixture(t)
+	m := f.createMonitor(t)
+	ctx := context.Background()
+
+	reg := notify.NewRegistry()
+	fp := fakeprov.New()
+	if err := reg.Register(fp); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	targetRepo := sqlite.NewNotificationTargetRepo(f.store, reg.SecretFields)
+	attemptRepo := sqlite.NewNotificationAttemptRepo(f.store)
+	now := time.Now().UTC()
+	if err := targetRepo.Insert(ctx, &notify.Target{
+		ID: monitor.NewID(), Name: "Ops", Kind: "fake", Enabled: true,
+		Config: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("Insert target: %v", err)
+	}
+
+	notifyPipe := notify.NewPipeline(reg, targetRepo, attemptRepo, notify.RetryConfig{MaxAttempts: 1}, discardLogger())
+	notifyPipe.Start(ctx)
+	defer notifyPipe.Stop()
+
+	p := pipeline.New(f.prober,
+		sqlite.NewCheckResultRepo(f.store), sqlite.NewMonitorStateRepo(f.store),
+		sqlite.NewEventRepo(f.store), sqlite.NewIncidentRepo(f.store), f.samples, discardLogger(),
+		pipeline.WithNotifications(notifyPipe, fakeGate{enabled: true}))
+
+	f.prober.queue = []probeOutcome{{success: false, errStr: "boom"}, {success: true}}
+
+	p.Run(ctx, *m, false) // down
+	waitForSends(t, fp, 1)
+	if got := fp.Sends()[0].Message.EventType; got != notify.EventMonitorDown {
+		t.Errorf("first send = %q, want %q", got, notify.EventMonitorDown)
+	}
+
+	p.Run(ctx, *m, false) // recovery
+	waitForSends(t, fp, 2)
+	if got := fp.Sends()[1].Message.EventType; got != notify.EventMonitorRecovered {
+		t.Errorf("second send = %q, want %q", got, notify.EventMonitorRecovered)
+	}
+
+	attempts, err := attemptRepo.ListRecent(ctx, 0)
+	if err != nil {
+		t.Fatalf("ListRecent: %v", err)
+	}
+	if len(attempts) != 2 {
+		t.Fatalf("attempts recorded = %d, want 2", len(attempts))
+	}
+	for _, a := range attempts {
+		if a.Status != notify.AttemptStatusSuccess {
+			t.Errorf("attempt %s status = %q, want success", a.ID, a.Status)
+		}
+	}
 }
 
 // createMonitor seeds an enabled HTTP monitor through the real monitor.Service

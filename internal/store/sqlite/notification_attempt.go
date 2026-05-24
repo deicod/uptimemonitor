@@ -74,6 +74,38 @@ func (r *NotificationAttemptRepo) ListByTarget(ctx context.Context, targetID str
 	return out, nil
 }
 
+// ListRecent returns the most recent attempts across all targets, newest
+// first. A non-positive limit returns all rows. It backs the global
+// GET /v1/notifications/attempts endpoint (SPEC §10.5), which — unlike
+// ListByTarget — is not scoped to a single target.
+func (r *NotificationAttemptRepo) ListRecent(ctx context.Context, limit int) ([]*notify.Attempt, error) {
+	if limit <= 0 {
+		limit = -1 // SQLite treats a negative LIMIT as unbounded.
+	}
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT "+notificationAttemptColumns+" FROM notification_attempts "+
+			"ORDER BY created_at DESC, id DESC LIMIT ?",
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list recent notification attempts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*notify.Attempt
+	for rows.Next() {
+		a, err := scanNotificationAttempt(rows)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite: list recent notification attempts: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlite: list recent notification attempts: %w", err)
+	}
+	return out, nil
+}
+
 // scanNotificationAttempt reads one notification_attempts row into an Attempt.
 func scanNotificationAttempt(s scannable) (*notify.Attempt, error) {
 	var (

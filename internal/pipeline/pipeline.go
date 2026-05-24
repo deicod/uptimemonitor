@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/deicod/uptimemonitor/internal/monitor"
+	"github.com/deicod/uptimemonitor/internal/notify"
 	"github.com/deicod/uptimemonitor/internal/store/tsdb"
 )
 
@@ -59,11 +60,28 @@ type SampleWriter interface {
 	WriteCheck(ctx context.Context, sample tsdb.CheckSample) error
 }
 
+// Notifier enqueues a notification job for asynchronous delivery
+// (*notify.Pipeline satisfies it). The check pipeline calls it when a
+// transition opens or resolves an incident (SPEC §17.3, §18.6).
+type Notifier interface {
+	Enqueue(job notify.Job)
+}
+
+// NotificationGate reports whether notifications are globally enabled, backing
+// the settings-stored runtime toggle (SPEC §18.6, §6 decision 5). A transition
+// is notified only when the gate is open, the monitor's NotificationsEnabled
+// flag is set, and — downstream in the delivery pipeline — the target is
+// enabled.
+type NotificationGate interface {
+	NotificationsEnabled(ctx context.Context) bool
+}
+
 // Pipeline executes one check and persists every consequence (SPEC §17.3): a
 // check_result row, the new monitor_states row, a monitor_state_changed event
 // on transitions, and the matching incident_opened / incident_resolved event
-// plus incident row when the transition opens or resolves downtime. Queueing
-// notifications is deferred to M9.11.
+// plus incident row when the transition opens or resolves downtime. When a
+// Notifier is wired (WithNotifications), it also queues monitor_down /
+// monitor_recovered notifications on those transitions (SPEC §17.3, §18.6).
 type Pipeline struct {
 	prober    Prober
 	checks    CheckResultRepo
@@ -72,16 +90,32 @@ type Pipeline struct {
 	incidents IncidentRepo
 	samples   SampleWriter
 	logger    *slog.Logger
+	notifier  Notifier
+	gate      NotificationGate
 }
 
-// New builds a Pipeline. All dependencies are required; the pipeline does no
-// I/O until Run is called. A nil logger falls back to slog.Default so the
+// Option customises a Pipeline at construction.
+type Option func(*Pipeline)
+
+// WithNotifications wires notification delivery into the pipeline. When the
+// notifier is nil the pipeline records transitions without notifying — the
+// behaviour before M9.11. The gate may be nil, which is treated as "globally
+// enabled" (the per-monitor and per-target flags still apply).
+func WithNotifications(notifier Notifier, gate NotificationGate) Option {
+	return func(p *Pipeline) {
+		p.notifier = notifier
+		p.gate = gate
+	}
+}
+
+// New builds a Pipeline. All positional dependencies are required; the pipeline
+// does no I/O until Run is called. A nil logger falls back to slog.Default so the
 // pipeline always has somewhere to surface persistence errors.
-func New(prober Prober, checks CheckResultRepo, states StateRepo, events EventRepo, incidents IncidentRepo, samples SampleWriter, logger *slog.Logger) *Pipeline {
+func New(prober Prober, checks CheckResultRepo, states StateRepo, events EventRepo, incidents IncidentRepo, samples SampleWriter, logger *slog.Logger, opts ...Option) *Pipeline {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Pipeline{
+	p := &Pipeline{
 		prober:    prober,
 		checks:    checks,
 		states:    states,
@@ -90,6 +124,10 @@ func New(prober Prober, checks CheckResultRepo, states StateRepo, events EventRe
 		samples:   samples,
 		logger:    logger,
 	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 // Run executes a single check for m and persists the outcome. It matches
@@ -187,14 +225,18 @@ func (p *Pipeline) run(ctx context.Context, m monitor.Monitor) error {
 		if err := p.insertEventWithID(ctx, evID, monitor.EventIncidentOpened, m.ID, nil, now); err != nil {
 			return err
 		}
+		incidentID := monitor.NewID()
 		if err := p.incidents.Open(ctx, &monitor.Incident{
-			ID:           monitor.NewID(),
+			ID:           incidentID,
 			MonitorID:    m.ID,
 			StartedAt:    now,
 			StartEventID: evID,
 			Reason:       cr.Error,
 		}); err != nil {
 			return fmt.Errorf("pipeline: open incident: %w", err)
+		}
+		if transition.NotifyDown {
+			p.enqueueNotification(ctx, m, notify.NewMonitorDownMessage(m.ID, m.Name, now), incidentID, evID)
 		}
 	}
 
@@ -209,6 +251,9 @@ func (p *Pipeline) run(ctx context.Context, m monitor.Monitor) error {
 		}
 		if err := p.incidents.Resolve(ctx, open.ID, now, evID); err != nil {
 			return fmt.Errorf("pipeline: resolve incident: %w", err)
+		}
+		if transition.NotifyRecovery {
+			p.enqueueNotification(ctx, m, notify.NewMonitorRecoveredMessage(m.ID, m.Name, now), open.ID, evID)
 		}
 	}
 
@@ -232,6 +277,21 @@ func (p *Pipeline) run(ctx context.Context, m monitor.Monitor) error {
 		return fmt.Errorf("pipeline: upsert monitor_state: %w", err)
 	}
 	return nil
+}
+
+// enqueueNotification queues msg for delivery, applying the global toggle (the
+// gate) and the per-monitor NotificationsEnabled flag (SPEC §18.6, §6 decision
+// 5); the per-target enabled check happens downstream in the delivery pipeline.
+// It is a no-op when no notifier is wired, so a pipeline built without
+// WithNotifications records transitions without notifying.
+func (p *Pipeline) enqueueNotification(ctx context.Context, m monitor.Monitor, msg notify.Message, incidentID, eventID string) {
+	if p.notifier == nil || !m.NotificationsEnabled {
+		return
+	}
+	if p.gate != nil && !p.gate.NotificationsEnabled(ctx) {
+		return
+	}
+	p.notifier.Enqueue(notify.Job{Message: msg, IncidentID: incidentID, EventID: eventID})
 }
 
 // insertEvent appends a monitor-scoped event with a freshly minted ID.
