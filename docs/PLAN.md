@@ -634,7 +634,7 @@ M9.1–M9.4 are done.
   the expected payload (`httptest`).
   *Context:* SPEC §18.5 (webhook, discord, slack), §18.1.
 
-- [ ] **M9.6 — ntfy & Gotify providers** — *deps: M9.1*
+- [x] **M9.6 — ntfy & Gotify providers** — *deps: M9.1*
   Add `providers/ntfy` and `providers/gotify` (SPEC §18.5).
   *Tests first:* `Validate` and `Send` via `httptest`, including token/auth-header
   handling.

@@ -23,6 +23,14 @@ import (
 // errors.Is) so the delivery pipeline can still distinguish shutdown from a
 // timeout.
 func PostJSON(ctx context.Context, client *http.Client, method, url string, body []byte) error {
+	return PostJSONWithHeaders(ctx, client, method, url, body, nil)
+}
+
+// PostJSONWithHeaders behaves like PostJSON but also sets the given request
+// headers, used by the ntfy and gotify providers to carry an auth token
+// (Authorization / X-Gotify-Key). Header values may be secret, so as with the
+// URL they are never echoed in the returned error.
+func PostJSONWithHeaders(ctx context.Context, client *http.Client, method, url string, body []byte, headers map[string]string) error {
 	if method == "" {
 		method = http.MethodPost
 	}
@@ -31,6 +39,9 @@ func PostJSON(ctx context.Context, client *http.Client, method, url string, body
 		return fmt.Errorf("build request: %w", sanitize(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

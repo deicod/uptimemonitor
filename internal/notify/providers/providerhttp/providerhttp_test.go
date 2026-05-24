@@ -41,6 +41,41 @@ func TestPostJSON_PostsBodyAndContentType(t *testing.T) {
 	}
 }
 
+// TestPostJSONWithHeaders_SetsHeaders proves the header variant attaches the
+// given request headers (auth tokens for the ntfy/gotify providers) while still
+// sending the JSON body and content type. Passing nil headers must behave like
+// plain PostJSON.
+func TestPostJSONWithHeaders_SetsHeaders(t *testing.T) {
+	var gotAuth, gotKey, gotCT string
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotKey = r.Header.Get("X-Gotify-Key")
+		gotCT = r.Header.Get("Content-Type")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	body := []byte(`{"hello":"world"}`)
+	headers := map[string]string{"Authorization": "Bearer tok", "X-Gotify-Key": "key"}
+	if err := PostJSONWithHeaders(context.Background(), srv.Client(), "", srv.URL, body, headers); err != nil {
+		t.Fatalf("PostJSONWithHeaders: %v", err)
+	}
+	if gotAuth != "Bearer tok" {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer tok")
+	}
+	if gotKey != "key" {
+		t.Errorf("X-Gotify-Key = %q, want %q", gotKey, "key")
+	}
+	if gotCT != "application/json" {
+		t.Errorf("content-type = %q, want application/json", gotCT)
+	}
+	if string(gotBody) != string(body) {
+		t.Errorf("body = %q, want %q", gotBody, body)
+	}
+}
+
 // TestPostJSON_HonorsMethod proves a caller can override the verb (the generic
 // webhook provider exposes a configurable method).
 func TestPostJSON_HonorsMethod(t *testing.T) {
