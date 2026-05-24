@@ -741,6 +741,10 @@ type HTTPMonitorConfig struct {
 
 MVP validation:
 
+- Name must be non-empty and must not contain control characters (it is
+  carried into notification payloads such as the email Subject and into TUI
+  rendering, so control characters are rejected at the source to prevent
+  header injection (CWE-93) and rendering corruption).
 - URL must be absolute.
 - Scheme must be `http` or `https`.
 - Method must be `GET`.

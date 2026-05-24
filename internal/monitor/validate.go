@@ -3,6 +3,7 @@ package monitor
 import (
 	"fmt"
 	"net/url"
+	"unicode"
 )
 
 // FieldError is a validation failure tied to a specific field. Naming the
@@ -22,6 +23,12 @@ func ValidateMonitor(m *Monitor) error {
 	switch {
 	case m.Name == "":
 		return &FieldError{"name", "must not be empty"}
+	case hasControlChar(m.Name):
+		// A name is a display string carried into notification payloads (e.g.
+		// the email Subject) and the TUI. Control characters there enable
+		// header injection (CWE-93) and break rendering, so reject them at the
+		// source rather than trusting every downstream consumer to sanitize.
+		return &FieldError{"name", "must not contain control characters"}
 	case m.Type != MonitorTypeHTTP:
 		return &FieldError{"type", fmt.Sprintf("unsupported monitor type %q", m.Type)}
 	case m.Interval <= 0:
@@ -30,6 +37,18 @@ func ValidateMonitor(m *Monitor) error {
 		return &FieldError{"timeout", "must be positive"}
 	}
 	return nil
+}
+
+// hasControlChar reports whether s contains any Unicode control character
+// (C0/C1, including CR, LF, NUL, and tab). Printable Unicode text — accented
+// letters, dashes, emoji — is allowed.
+func hasControlChar(s string) bool {
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateHTTPConfig checks an HTTP monitor's type-specific configuration

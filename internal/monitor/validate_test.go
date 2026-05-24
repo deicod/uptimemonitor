@@ -25,6 +25,13 @@ func TestValidateMonitor(t *testing.T) {
 	}{
 		{"valid baseline", func(*Monitor) {}, ""},
 		{"empty name", func(m *Monitor) { m.Name = "" }, "name"},
+		// Control characters in a name would inject SMTP headers via the email
+		// provider's Subject (CWE-93) and corrupt TUI rendering; reject them
+		// here rather than relying on each consumer to sanitize.
+		{"name with CRLF", func(m *Monitor) { m.Name = "a\r\nBcc: evil@example.com" }, "name"},
+		{"name with NUL", func(m *Monitor) { m.Name = "a\x00b" }, "name"},
+		{"name with tab", func(m *Monitor) { m.Name = "a\tb" }, "name"},
+		{"name with unicode letters accepted", func(m *Monitor) { m.Name = "café—naïve" }, ""},
 		{"unsupported type", func(m *Monitor) { m.Type = "tcp" }, "type"},
 		{"zero interval", func(m *Monitor) { m.Interval = 0 }, "interval"},
 		{"negative interval", func(m *Monitor) { m.Interval = -time.Second }, "interval"},

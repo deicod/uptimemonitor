@@ -645,7 +645,7 @@ M9.1–M9.4 are done.
   *Tests first:* `Validate` and `Send` via `httptest`.
   *Context:* SPEC §18.5 (telegram).
 
-- [ ] **M9.8 — Email/SMTP provider** — *deps: M9.1*
+- [x] **M9.8 — Email/SMTP provider** — *deps: M9.1*
   Add `providers/email`: SMTP send with STARTTLS and auth (SPEC §18.5).
   *Tests first:* `Validate`; `Send` against an in-process SMTP test server.
   *Context:* SPEC §18.5 (email).
