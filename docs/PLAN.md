@@ -756,7 +756,7 @@ monitor; the HTTP type gains an optional keyword check; and the v0.1.0
 payload. Tasks M11.5–M11.8 are independent and parallelizable once M11.4 is
 done.
 
-- [ ] **M11.1 — Monitor types & per-type config structs** — *deps: M10.6*
+- [x] **M11.1 — Monitor types & per-type config structs** — *deps: M10.6*
   Extend `internal/monitor/model.go` with `MonitorTypeTCP`, `MonitorTypePing`,
   `MonitorTypeDNS`. Extend `HTTPMonitorConfig` with `BodyCap int64` and
   `Keyword *HTTPKeyword` (with `HTTPKeywordMode` enum:
