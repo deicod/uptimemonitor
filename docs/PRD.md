@@ -1,8 +1,8 @@
 # Uptime Monitor PRD
 
 Status: Draft  
-Version: 0.2  
-Date: 2026-05-18  
+Version: 0.3  
+Date: 2026-05-26  
 Repository: `github.com/deicod/uptimemonitor`  
 License: MIT  
 Primary target: Linux with systemd  
@@ -253,7 +253,7 @@ The TUI command must:
 
 The system must allow users to:
 
-- Create HTTP monitors.
+- Create monitors.
 - List monitors.
 - View monitor details.
 - Update monitor configuration.
@@ -264,30 +264,90 @@ The system must allow users to:
 
 Monitor creation and editing should happen primarily in the TUI.
 
-### 11.4 HTTP monitor
+### 11.4 Monitor types
 
-The first monitor type is HTTP.
+The MVP (v0.1.0) shipped with HTTP only. Release 0.2.0 adds three more monitor types (TCP port, ICMP ping, DNS) and extends HTTP with optional keyword matching.
 
-An HTTP monitor must support:
+All monitor types share these common fields:
 
 - Display name.
-- URL.
-- Method, initially `GET`.
+- Type (one of: `http`, `tcp`, `ping`, `dns`).
 - Check interval.
 - Timeout.
-- Expected status code or status code range.
 - Enable/disable flag.
 - Notification enable/disable behavior.
 
-The MVP may defer:
+Type-specific configuration is defined in the subsections below.
+
+#### 11.4.1 HTTP monitor
+
+An HTTP monitor must support, in addition to the common fields:
+
+- URL.
+- Method, initially `GET`.
+- Expected status code or status code range.
+- Optional keyword check, at most one of:
+  - Body must contain a given substring.
+  - Body must not contain a given substring.
+  - Body must match a given regular expression.
+
+All keyword comparisons are case-sensitive (the substring forms use literal byte comparison; the regex form requires explicit case-insensitive flags inside the pattern when desired).
+
+The response body is read up to a configurable size cap (default 1 MiB) for keyword evaluation. Bodies larger than the cap are truncated for the check; the rest is drained within the monitor timeout.
+
+Deferred to a later release:
 
 - Custom request headers.
 - Request bodies.
 - HTTP authentication.
 - TLS certificate expiry checks.
-- Keyword matching.
 - Redirect policy configuration.
 - Proxy configuration.
+
+#### 11.4.2 TCP port monitor
+
+A TCP port monitor must support, in addition to the common fields:
+
+- Host (hostname or IP).
+- Port.
+
+Success is defined as a successful TCP connect within the timeout. The connection is closed immediately after establishment; no application-layer payload is exchanged.
+
+Deferred to a later release:
+
+- Send/expect payload patterns.
+- TLS handshake monitoring (a dedicated TLS expiry check remains a separate future item, see §20).
+
+#### 11.4.3 ICMP ping monitor
+
+An ICMP ping monitor must support, in addition to the common fields:
+
+- Host (hostname or IP).
+- Optional packet count (default 1, bounded; exact semantics defined in the SPEC).
+
+Success is defined as receiving at least one ICMP echo reply within the timeout. The probe uses unprivileged ICMP datagram sockets; operators must configure `net.ipv4.ping_group_range` to include the service user/group. The SPEC documents the operational requirement and the systemd unit guidance.
+
+Deferred to a later release:
+
+- IPv6 ping (the first implementation targets IPv4; SPEC tracks IPv6 follow-up).
+- Loss and jitter aggregation across multiple packets beyond a basic success indicator.
+
+#### 11.4.4 DNS monitor
+
+A DNS monitor must support, in addition to the common fields:
+
+- Query name (FQDN).
+- Record type (one of: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`).
+- Optional resolver (defaults to the system resolver).
+- Optional expected-value check, expressed as a condition plus a value. Conditions are `equals`, `not_equals`, `contains`, `not_contains`, `starts_with`, `not_starts_with`, `ends_with`, `not_ends_with`. Positive conditions (`equals`, `contains`, `starts_with`, `ends_with`) are satisfied when at least one returned record value meets them. Negative conditions (`not_equals`, `not_contains`, `not_starts_with`, `not_ends_with`) are satisfied when no returned record value meets the corresponding positive form. All comparisons are case-sensitive.
+
+Success is defined as receiving a non-empty answer of the requested record type within the timeout, with no error rcode, and (when an expected-value check is configured) satisfying that check.
+
+Deferred to a later release:
+
+- DNS-over-TLS and DNS-over-HTTPS resolvers.
+- DNSSEC validation.
+- SOA, AXFR, and ANY queries.
 
 ### 11.5 Check execution
 
@@ -297,7 +357,7 @@ The service must:
 - Respect monitor timeout settings.
 - Record success or failure.
 - Record response duration.
-- Record relevant HTTP response metadata.
+- Record relevant per-type metadata.
 - Avoid overlapping checks for the same monitor unless explicitly supported later.
 - Persist enough information to show current status and recent history.
 
@@ -466,9 +526,9 @@ Displays:
 
 ### 12.3 Monitor form screen
 
-Allows creating and editing HTTP monitors.
+Allows creating and editing monitors of any supported type.
 
-The form should support all MVP HTTP monitor fields.
+The form adapts to the selected monitor type and exposes the common fields together with the type-specific fields documented in §11.4.
 
 ### 12.4 Notification settings screen
 
@@ -705,16 +765,14 @@ The MVP is successful when a user can:
 - Run the service under systemd.
 - Build a container image using ko.
 
+Release 0.2.0 is additionally successful when a user can create TCP port, ICMP ping, and DNS monitors, and attach a keyword check to an HTTP monitor, with each type producing the same up/down classification, notifications, and history as HTTP.
+
 ## 20. Future scope
 
 Potential future features:
 
 - Web UI.
-- TCP monitors.
-- DNS monitors.
-- ICMP ping monitors.
 - TLS certificate expiry checks.
-- Keyword/content checks.
 - Custom HTTP headers.
 - Request body support.
 - Additional notification integrations beyond the MVP provider set.
@@ -773,6 +831,15 @@ These decisions are considered accepted for PRD v0.1:
 - The TUI should expose all MVP configuration.
 - Destructive TUI actions require confirmation.
 - Prometheus metrics export is not part of the MVP.
+
+Decisions accepted for PRD v0.3:
+
+- The next release line beyond v0.1.0 is v0.2.0, which adds three monitor types (TCP port, ICMP ping, DNS) and extends HTTP with keyword matching.
+- HTTP keyword matching is an extension to the existing HTTP monitor type, not a separate monitor type.
+- HTTP keyword comparisons are case-sensitive across all match modes (contains, not-contains, regex).
+- DNS expected-value checks support eight conditions — `equals`/`not_equals`, `contains`/`not_contains`, `starts_with`/`not_starts_with`, `ends_with`/`not_ends_with` — with case-sensitive comparison. Positive conditions are existential ("at least one record matches"); negative conditions are universal ("no record matches the positive form").
+- ICMP ping uses unprivileged ICMP datagram sockets; operators are expected to configure `net.ipv4.ping_group_range` (or equivalent group/cap setup), documented in the SPEC and the systemd unit guidance.
+- Probe results carry type-specific data through a typed `details` payload defined in the SPEC, replacing the HTTP-specific column shipped in v0.1.0.
 
 ## 23. Research notes
 

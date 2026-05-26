@@ -1,11 +1,11 @@
 # Uptime Monitor Technical Specification
 
 Status: Draft  
-Version: 0.3  
-Date: 2026-05-24  
+Version: 0.4  
+Date: 2026-05-26  
 Repository: `github.com/deicod/uptimemonitor`  
 License: MIT  
-Derived from: `docs/PRD.md` version 0.2  
+Derived from: `docs/PRD.md` version 0.3  
 Primary target: Linux with systemd  
 Primary interface: Bubble Tea terminal UI
 
@@ -56,6 +56,7 @@ The following decisions are accepted for this SPEC:
 - Container build path: ko.
 - Primary supervisor: systemd.
 - MVP monitor type: HTTP.
+- Release 0.2.0 monitor types: HTTP (with optional keyword check), TCP port, ICMP ping (unprivileged), DNS.
 - MVP access model: local single-user, no TUI login.
 - Future access boundary: configurable secret for future web UI/API.
 - Prometheus metrics export: excluded from MVP.
@@ -123,9 +124,13 @@ Recommended initial layout:
 │   │       ├── telegram/
 │   │       └── webhook/
 │   ├── probe/
+│   │   ├── details.go
+│   │   ├── dns.go
 │   │   ├── http.go
+│   │   ├── ping.go
 │   │   ├── result.go
-│   │   └── runner.go
+│   │   ├── runner.go
+│   │   └── tcp.go
 │   ├── scheduler/
 │   │   ├── scheduler.go
 │   │   └── worker.go
@@ -587,6 +592,10 @@ Request:
 }
 ```
 
+For `type` values other than `http`, the `config` object matches the
+type-specific struct documented in §11.2: `TCPMonitorConfig` (§11.2.2),
+`ICMPPingMonitorConfig` (§11.2.3), or `DNSMonitorConfig` (§11.2.4).
+
 #### Get monitor
 
 ```text
@@ -728,45 +737,172 @@ type Monitor struct {
 }
 ```
 
-### 11.2 HTTP monitor config
+### 11.2 Monitor config payloads
+
+Each monitor type defines a Go struct that marshals to/from the
+`Monitor.Config` JSON. Runner contracts are in §15.2; result payloads are in
+§15.3.
+
+`MonitorType` is one of:
+
+```go
+const (
+    MonitorTypeHTTP MonitorType = "http"
+    MonitorTypeTCP  MonitorType = "tcp"
+    MonitorTypePing MonitorType = "ping"
+    MonitorTypeDNS  MonitorType = "dns"
+)
+```
+
+#### 11.2.1 HTTP
 
 ```go
 type HTTPMonitorConfig struct {
-    URL               string `json:"url"`
-    Method            string `json:"method"`
-    ExpectedStatusMin int    `json:"expected_status_min"`
-    ExpectedStatusMax int    `json:"expected_status_max"`
+    URL               string       `json:"url"`
+    Method            string       `json:"method"`
+    ExpectedStatusMin int          `json:"expected_status_min"`
+    ExpectedStatusMax int          `json:"expected_status_max"`
+    BodyCap           int64        `json:"body_cap,omitempty"` // bytes; default 1<<20 (1 MiB)
+    Keyword           *HTTPKeyword `json:"keyword,omitempty"`
+}
+
+type HTTPKeyword struct {
+    Mode  HTTPKeywordMode `json:"mode"`  // contains | not_contains | regex
+    Value string          `json:"value"` // literal substring or RE2 pattern
+}
+
+type HTTPKeywordMode string
+
+const (
+    HTTPKeywordContains    HTTPKeywordMode = "contains"
+    HTTPKeywordNotContains HTTPKeywordMode = "not_contains"
+    HTTPKeywordRegex       HTTPKeywordMode = "regex"
+)
+```
+
+Validation:
+
+- URL must be absolute; scheme must be `http` or `https`.
+- Method must be `GET` (other methods deferred).
+- Expected status range: `100 ≤ min ≤ max ≤ 599`; when both fields are zero,
+  the runner uses `200`/`299`.
+- `BodyCap`: when zero, the runner uses the default 1 MiB; when non-zero,
+  must be `≥ 1024` and `≤ 16<<20` (16 MiB).
+- `Keyword.Value`: non-empty when `Keyword` is set. For `regex`, the value
+  must compile under `regexp.Compile` at validation time.
+
+#### 11.2.2 TCP
+
+```go
+type TCPMonitorConfig struct {
+    Host string `json:"host"`
+    Port int    `json:"port"`
 }
 ```
 
-MVP validation:
+Validation:
 
-- Name must be non-empty and must not contain control characters (it is
-  carried into notification payloads such as the email Subject and into TUI
-  rendering, so control characters are rejected at the source to prevent
-  header injection (CWE-93) and rendering corruption).
-- URL must be absolute.
-- Scheme must be `http` or `https`.
-- Method must be `GET`.
-- Expected status range must be valid.
-- Timeout must be positive.
-- Interval must be positive.
+- `Host`: non-empty; either a DNS name (RFC 1035 syntax) or a textual IP
+  address.
+- `Port`: `1 ≤ port ≤ 65535`.
+
+#### 11.2.3 ICMP ping
+
+```go
+type ICMPPingMonitorConfig struct {
+    Host        string `json:"host"`
+    PacketCount int    `json:"packet_count,omitempty"` // default 1, max 5
+}
+```
+
+Validation:
+
+- `Host`: non-empty; DNS name or IPv4 textual address. The validator rejects
+  hosts that resolve only to IPv6, with an error pointing at the IPv6
+  deferral, so the operator sees a setup problem rather than a flapping
+  monitor.
+- `PacketCount`: when zero, treated as 1; when non-zero, must be in `[1, 5]`.
+
+#### 11.2.4 DNS
+
+```go
+type DNSMonitorConfig struct {
+    Name          string            `json:"name"`        // FQDN
+    RecordType    DNSRecordType     `json:"record_type"` // A | AAAA | CNAME | MX | TXT | NS
+    Resolver      string            `json:"resolver,omitempty"` // optional host:port
+    ExpectedValue *DNSExpectedValue `json:"expected_value,omitempty"`
+}
+
+type DNSRecordType string
+
+const (
+    DNSRecordA     DNSRecordType = "A"
+    DNSRecordAAAA  DNSRecordType = "AAAA"
+    DNSRecordCNAME DNSRecordType = "CNAME"
+    DNSRecordMX    DNSRecordType = "MX"
+    DNSRecordTXT   DNSRecordType = "TXT"
+    DNSRecordNS    DNSRecordType = "NS"
+)
+
+type DNSExpectedValue struct {
+    Condition DNSMatchCondition `json:"condition"`
+    Value     string            `json:"value"`
+}
+
+type DNSMatchCondition string
+
+const (
+    DNSCondEquals        DNSMatchCondition = "equals"
+    DNSCondNotEquals     DNSMatchCondition = "not_equals"
+    DNSCondContains      DNSMatchCondition = "contains"
+    DNSCondNotContains   DNSMatchCondition = "not_contains"
+    DNSCondStartsWith    DNSMatchCondition = "starts_with"
+    DNSCondNotStartsWith DNSMatchCondition = "not_starts_with"
+    DNSCondEndsWith      DNSMatchCondition = "ends_with"
+    DNSCondNotEndsWith   DNSMatchCondition = "not_ends_with"
+)
+```
+
+Validation:
+
+- `Name`: non-empty; valid FQDN syntax.
+- `RecordType`: must be one of the listed constants.
+- `Resolver`: when set, must parse as `host:port` with port in `[1, 65535]`.
+- `ExpectedValue.Value`: non-empty when `ExpectedValue` is set.
+
+#### 11.2.5 Common validation
+
+These rules apply to every monitor type:
+
+- `Name`: non-empty; must not contain control characters (it is carried into
+  notification payloads such as the email Subject and into TUI rendering, so
+  control characters are rejected at the source to prevent header injection
+  (CWE-93) and rendering corruption).
+- `Type`: must be one of `http`, `tcp`, `ping`, `dns`.
+- `Interval`: positive.
+- `Timeout`: positive; less than `Interval` by default.
+- `Config`: must decode cleanly into the type-specific struct above and pass
+  its validation.
 
 ### 11.3 Check result
 
 ```go
 type CheckResult struct {
-    ID             string
-    MonitorID      string
-    StartedAt      time.Time
-    FinishedAt     time.Time
-    Duration       time.Duration
-    Success        bool
-    State          MonitorState
-    Error          string
-    HTTPStatusCode *int
+    ID         string
+    MonitorID  string
+    StartedAt  time.Time
+    FinishedAt time.Time
+    Duration   time.Duration
+    Success    bool
+    State      MonitorState
+    Error      string
+    Details    json.RawMessage // type-specific payload; see §15.3
 }
 ```
+
+The v0.1.0 `HTTPStatusCode *int` field is removed in v0.4. HTTP status code
+now lives inside `Details` as `HTTPDetails.StatusCode`. Migration 0002
+(§13.4) backfills existing rows.
 
 ### 11.4 Monitor states
 
@@ -896,7 +1032,7 @@ CREATE TABLE check_results (
     success INTEGER NOT NULL,
     state TEXT NOT NULL,
     error TEXT,
-    http_status_code INTEGER
+    details TEXT  -- type-specific JSON; see §15.3
 );
 
 CREATE INDEX idx_check_results_monitor_started
@@ -1025,6 +1161,29 @@ make migrate-apply
 
 Exact Atlas commands should be defined when the repository build tooling is added.
 
+### 13.4 v0.2.0 migration: check_result details
+
+The v0.1.0 schema (§12.3) stored HTTP-specific data in
+`check_results.http_status_code`. v0.2.0 replaces this column with a typed
+JSON payload to support TCP, ICMP, DNS, and HTTP-keyword data without
+widening the row per type.
+
+Migration `0002_check_result_details.sql`:
+
+```sql
+ALTER TABLE check_results ADD COLUMN details TEXT;
+UPDATE check_results
+   SET details = json_object('status_code', http_status_code)
+ WHERE http_status_code IS NOT NULL;
+ALTER TABLE check_results DROP COLUMN http_status_code;
+```
+
+`ALTER TABLE … DROP COLUMN` requires SQLite ≥ 3.35.0, which `modernc.org/sqlite`
+satisfies. Existing rows produced by the v0.1.0 HTTP runner are preserved
+through the backfill: `http_status_code = N` becomes
+`details = {"status_code": N}`. New runners emit their own typed payloads
+(§15.3).
+
 ## 14. Prometheus TSDB storage
 
 ### 14.1 TSDB role
@@ -1055,6 +1214,13 @@ phase
 ```
 
 Avoid high-cardinality labels such as URL, error message, or monitor name. Store those in SQLite.
+
+The `monitor_type` label takes one of `http`, `tcp`, `ping`, `dns`.
+`uptimemonitor_probe_http_status_code` is emitted only for HTTP monitors; the
+other types record their type-specific observations through `CheckResult.Details`
+(§15.3) rather than additional TSDB series, to avoid metric sprawl. Adding
+per-type series (e.g. ICMP RTT histograms, DNS rcode counters) is deferred to
+a later release.
 
 ### 14.3 Samples
 
@@ -1131,37 +1297,197 @@ type Runner interface {
 }
 ```
 
-### 15.2 HTTP runner
+Each Runner is stateless across calls and safe to invoke concurrently for
+distinct monitors. `Run` returns a `probe.Result` describing the observation;
+per-check failures (transport errors, out-of-range responses, lookup failures,
+ICMP timeouts) are reported through `Result.Success` and `Result.Error`. The
+error return value is reserved for Runner-level problems (e.g. malformed
+monitor config that escaped validation, or a missing OS facility such as the
+unprivileged ICMP socket) — see §15.4.
 
-MVP behavior:
+```go
+type Result struct {
+    StartedAt  time.Time
+    FinishedAt time.Time
+    Duration   time.Duration
+    Success    bool
+    Error      string          // sanitized; no secrets, no raw request data
+    Details    json.RawMessage // type-specific; see §15.3
+}
+```
 
-- Supports `GET` only.
+### 15.2 Runner registry
+
+The probe Dispatcher routes a check to the Runner registered for the
+monitor's `MonitorType`. v0.2.0 ships four runners:
+
+```text
+http  -> HTTP runner (§15.2.1)
+tcp   -> TCP port runner (§15.2.2)
+ping  -> ICMP ping runner (§15.2.3)
+dns   -> DNS runner (§15.2.4)
+```
+
+`NewDispatcher()` registers all four. Tests may override the registry by
+calling `Register` before sharing the dispatcher across goroutines.
+
+#### 15.2.1 HTTP runner
+
+Behavior:
+
+- Supports `GET` only (other methods deferred).
 - Uses per-monitor timeout.
-- Follows Go default redirect behavior initially.
-- Records HTTP status code.
-- Measures total duration.
-- Classifies success by expected status range.
+- Follows Go's default redirect behavior.
+- Reads up to `HTTPMonitorConfig.BodyCap` bytes of the body (default 1 MiB)
+  when a keyword check is configured; otherwise drains and discards the body
+  within the timeout.
+- Records HTTP status code in `HTTPDetails` (§15.3).
+- Classifies success when (a) the request completed without transport error,
+  (b) the response status code falls within the configured expected range
+  (default 200–299), and (c) the keyword check passes when configured.
 
-### 15.3 HTTP result classification
+Keyword check (`HTTPMonitorConfig.Keyword`, optional):
 
-A check is successful when:
+- `contains`: success requires the read body to contain `Value` (literal byte
+  match).
+- `not_contains`: success requires the read body to NOT contain `Value`.
+- `regex`: success requires the compiled `Value` (RE2 syntax) to match
+  anywhere in the read body. The regex is compiled at monitor validation
+  time; case sensitivity is controlled by the pattern (e.g. `(?i)…`).
 
-```text
-request completes without transport error
-and response status code is within configured expected range
+If the body exceeds `BodyCap`, the read truncates at `BodyCap` and the
+keyword check evaluates the prefix; the remainder of the connection is
+drained within the monitor timeout to avoid TCP teardown noise.
+
+#### 15.2.2 TCP port runner
+
+Behavior:
+
+- Resolves `TCPMonitorConfig.Host` with the default `net.Resolver`.
+- Dials TCP to `Host:Port` within the per-monitor timeout.
+- Closes the connection on success; no application-layer payload is
+  exchanged.
+- Records the resolved address in `TCPDetails`.
+- Classifies success as a successful connect within the timeout.
+
+#### 15.2.3 ICMP ping runner
+
+Behavior:
+
+- Uses unprivileged ICMP datagram sockets via `golang.org/x/net/icmp` and
+  `golang.org/x/net/ipv4` (IPv4 only in v0.2.0; IPv6 deferred).
+- Resolves `ICMPPingMonitorConfig.Host` to an IPv4 address.
+- Sends `PacketCount` echo requests (default 1, bounded ≤ 5) back-to-back,
+  waiting at most `timeout/PacketCount` for each reply.
+- Records resolved address, packets sent, packets received, and best RTT in
+  `ICMPPingDetails`; `BestRTTMs` is omitted when no reply arrived.
+- Classifies success as receiving at least one reply within the timeout.
+
+Operational requirement (`ping_group_range`):
+
+- The runner opens `unix.SOCK_DGRAM` with `IPPROTO_ICMP`. Linux permits this
+  without `CAP_NET_RAW` when the process's GID is within
+  `net.ipv4.ping_group_range`.
+- The systemd unit (§21) and `deployments/` docs document configuring
+  `net.ipv4.ping_group_range` to include the service group.
+- If the unprivileged ICMP socket cannot be opened, the runner returns a
+  Runner-level error (not a per-check failure) so the operator sees a setup
+  problem rather than a flapping "down" state. The service logs the error
+  and marks the monitor as misconfigured until the operator fixes the
+  sysctl.
+
+#### 15.2.4 DNS runner
+
+Behavior:
+
+- If `DNSMonitorConfig.Resolver` is set (e.g. `1.1.1.1:53`), the runner uses
+  a `net.Resolver{PreferGo: true, Dial: ...}` that dials UDP to the
+  configured address. Otherwise the runner uses the system resolver.
+- Issues exactly one query for `Name` of `RecordType` within the per-monitor
+  timeout.
+- Records resolver, rcode string (`NOERROR`, `NXDOMAIN`, `SERVFAIL`, …),
+  answer count, and the first up-to-10 record values (zone-file textual
+  form) in `DNSDetails`.
+- Classifies success as: no error rcode, a non-empty answer set of the
+  requested record type, and (when configured) the expected-value check
+  passes.
+
+Expected-value check (`DNSMonitorConfig.ExpectedValue`, optional):
+
+- Each returned record is serialized to its zone-file textual form (e.g.
+  `1.2.3.4` for A; `mail.example.com.` for CNAME/NS; `10 mail.example.com.`
+  for MX; the joined character-string contents for TXT).
+- Supported conditions (case-sensitive, byte comparisons):
+  - `equals` / `not_equals`
+  - `contains` / `not_contains`
+  - `starts_with` / `not_starts_with`
+  - `ends_with` / `not_ends_with`
+- Positive conditions (`equals`, `contains`, `starts_with`, `ends_with`) are
+  satisfied when at least one record string meets them.
+- Negative conditions (`not_equals`, `not_contains`, `not_starts_with`,
+  `not_ends_with`) are satisfied when no record string meets the
+  corresponding positive form.
+
+### 15.3 Result.Details payloads
+
+Each runner populates `Result.Details` with a marshaled type-specific
+struct. The TUI and IPC consumers read this verbatim and select a renderer
+based on the parent monitor's `Type`.
+
+```go
+// monitor.MonitorTypeHTTP -> HTTPDetails
+type HTTPDetails struct {
+    StatusCode     *int  `json:"status_code,omitempty"`
+    KeywordMatched *bool `json:"keyword_matched,omitempty"` // present only when a keyword check ran
+}
+
+// monitor.MonitorTypeTCP -> TCPDetails
+type TCPDetails struct {
+    RemoteAddr string `json:"remote_addr"` // resolved host:port
+}
+
+// monitor.MonitorTypePing -> ICMPPingDetails
+type ICMPPingDetails struct {
+    RemoteAddr      string `json:"remote_addr"`
+    PacketsSent     int    `json:"packets_sent"`
+    PacketsReceived int    `json:"packets_received"`
+    BestRTTMs       *int64 `json:"best_rtt_ms,omitempty"` // omitted when no reply arrived
+}
+
+// monitor.MonitorTypeDNS -> DNSDetails
+type DNSDetails struct {
+    Resolver    string   `json:"resolver"`    // "system" or "host:port"
+    RCode       string   `json:"rcode"`       // NOERROR, NXDOMAIN, ...
+    AnswerCount int      `json:"answer_count"`
+    Records     []string `json:"records,omitempty"` // first up-to-10, zone-file form
+}
 ```
 
-Default expected range:
-
-```text
-200-299
-```
+The check_result row stores Details as the `details TEXT` column (§12.3). A
+nil `Details` is allowed; every v0.2.0 runner sets a value. IPC consumers
+must understand the schema for their monitor type; the service returns
+Details verbatim and does not normalize across types.
 
 ### 15.4 Error handling
 
-Transport errors should be stored as failed check results with a sanitized error string.
+Transport errors are stored as failed check results with a sanitized error
+string. Do not store sensitive request data, secrets, or raw query
+contents in error fields.
 
-Do not store sensitive request data in error fields.
+The Runner interface distinguishes per-check failures from Runner-level
+errors:
+
+- **Per-check failure** — returned via `Result.Success = false` and a
+  sanitized `Result.Error`. Use for: HTTP transport errors, status out of
+  range, keyword mismatch; TCP connect refused or timeout; ICMP timeouts
+  (no reply within budget); DNS lookup errors, NXDOMAIN, SERVFAIL, empty
+  answer set, expected-value mismatch.
+- **Runner-level error** — returned via the second return value of `Run`.
+  Use for: unrecoverable setup problems such as malformed monitor config
+  that escaped validation, or the unprivileged ICMP socket failing to open
+  on a host whose `ping_group_range` excludes the service group. These
+  surface as service-level errors in logs and as a misconfigured indicator
+  in the TUI, not as flapping monitor state.
 
 ## 16. Scheduler
 
@@ -1648,6 +1974,27 @@ The service should notify readiness after:
 
 If watchdog support is enabled by systemd, the service should periodically report liveness.
 
+### 21.4 ICMP ping prerequisites
+
+The unprivileged ICMP runner (§15.2.3) opens an ICMP datagram socket which
+requires the service group to be inside `net.ipv4.ping_group_range`.
+
+Operators running ICMP ping monitors should drop a sysctl file alongside the
+unit, for example:
+
+```ini
+# /etc/sysctl.d/60-uptimemonitor-ping.conf
+net.ipv4.ping_group_range = 0 2147483647
+```
+
+A hardened deployment can replace the upper bound with the service GID range
+instead of `2147483647`. The `deployments/` directory ships an example
+drop-in alongside `uptimemonitor.service`.
+
+This requirement applies only to hosts running ICMP ping monitors; HTTP,
+TCP, and DNS monitors do not need it. The service does not modify sysctls
+itself.
+
 ## 22. Containerization with ko
 
 ### 22.1 Image entrypoint
@@ -1717,21 +2064,31 @@ error
 Required areas:
 
 - Config loading and validation.
-- HTTP monitor validation.
-- HTTP probe classification.
+- Monitor validation per type (HTTP, TCP, ICMP ping, DNS — §11.2).
+- HTTP probe classification (status range + keyword check; §15.2.1).
+- DNS expected-value condition matrix (eight conditions × positive/negative
+  semantics; §15.2.4).
 - State transitions.
 - Notification provider validation.
 - Notification retry decisions.
 - IPC handler validation.
+- Per-type `Details` marshaling/unmarshaling (§15.3).
 
 ### 24.2 Integration tests
 
 Required areas:
 
-- SQLite migrations on empty database.
+- SQLite migrations on empty database, including migration 0002 backfill from
+  a v0.1.0 dataset (§13.4).
 - Service startup with temporary directories.
-- Monitor create/update/delete over IPC.
+- Monitor create/update/delete over IPC for every type.
 - Manual check over IPC.
+- TCP runner against `net.Listen("tcp", "127.0.0.1:0")` loopback listener.
+- DNS runner against an in-process DNS server (e.g. `github.com/miekg/dns`)
+  exposing canned A / AAAA / MX / TXT / CNAME / NS responses.
+- ICMP runner integration test is skipped by default and gated on a build
+  tag or env var (e.g. `UPTIMEMONITOR_TEST_ICMP=1`) because it requires
+  `ping_group_range` to be configured; CI defaults to skip.
 - Notification test path with fake provider.
 - TSDB sample write and query.
 
@@ -1861,6 +2218,29 @@ Deliver:
 - Example config.
 - Install/run documentation.
 
+### Milestone 8: Additional monitor types (v0.2.0)
+
+Deliver:
+
+- Migration `0002_check_result_details.sql` replacing
+  `check_results.http_status_code` with `details TEXT` and backfilling
+  existing rows (§13.4).
+- `probe.Result.Details` and per-type Details structs (§15.3).
+- HTTP runner extended with body cap and keyword check (§15.2.1).
+- TCP port runner (§15.2.2).
+- ICMP ping runner using unprivileged datagram sockets (§15.2.3); systemd
+  unit and `deployments/` docs updated for `ping_group_range`.
+- DNS runner (§15.2.4) with optional custom resolver and 8-condition
+  expected-value check.
+- Per-type `monitor.Config` validation (§11.2).
+- Dispatcher registers all four runners by default.
+- IPC schema updated to expose `Details` on check-result responses and
+  accept type-specific configs on monitor create/update.
+- TUI monitor form: type selector + type-specific field groups; monitor
+  detail screen renders per-type summary lines from `Details`.
+- End-to-end smoke test extended to cover all four types (with the ICMP
+  variant gated behind the env-var/build-tag described in §24.2).
+
 ## 27. Resolved technical questions
 
 The technical questions left open by SPEC v0.1 are resolved as follows in SPEC
@@ -1881,6 +2261,32 @@ v0.2. Each resolution is also reflected in the section noted.
 7. The future secret is loaded only from config/env in the MVP and is not stored
    or hashed in SQLite (§20.2).
 8. Development commands are encoded in a `Makefile` (§3, §25).
+
+### 27.1 Resolved in SPEC v0.4
+
+These decisions are accepted for SPEC v0.4 (derived from PRD v0.3 §22):
+
+1. Release 0.2.0 adds three monitor types — TCP port, ICMP ping (unprivileged),
+   DNS — and extends HTTP with optional keyword matching (§3, §11.2, §15.2).
+2. HTTP keyword matching is an extension of the HTTP monitor type, with three
+   modes: `contains`, `not_contains`, `regex` (§11.2.1, §15.2.1). The `regex`
+   mode uses Go's RE2 (`regexp.Compile`); case sensitivity is controlled by the
+   pattern, not by an external flag.
+3. ICMP ping uses unprivileged ICMP datagram sockets via Linux's
+   `net.ipv4.ping_group_range`. Operators configure the sysctl at install
+   time; the service does not modify it (§15.2.3, §21.4).
+4. `probe.Result` carries type-specific data via a `Details json.RawMessage`
+   payload (§15.3); the v0.1.0 `check_results.http_status_code` column is
+   replaced by `details TEXT` through migration 0002 (§13.4).
+5. DNS expected-value checks support eight conditions; positive conditions
+   are existential ("at least one record matches"), negative conditions are
+   universal ("no record matches the positive form"); all comparisons are
+   case-sensitive byte comparisons against the zone-file textual form of
+   each record (§15.2.4).
+6. Per-type TSDB metrics are deferred; v0.2.0 keeps the three existing series
+   (`uptimemonitor_probe_success`, `_duration_seconds`,
+   `_http_status_code` HTTP-only) and stores per-type observations in
+   `Details` (§14.2).
 
 ## 28. Acceptance criteria for the MVP implementation
 
@@ -1903,6 +2309,29 @@ An implementation satisfies this SPEC when:
 - The service can run under systemd.
 - The project can build a container image using ko.
 
+### 28.1 v0.2.0 acceptance criteria
+
+In addition to the MVP criteria above, v0.2.0 is satisfied when:
+
+- A user can create monitors of types `http`, `tcp`, `ping`, and `dns`
+  through the TUI; the form exposes the type-specific fields documented in
+  §11.2.
+- The HTTP monitor form accepts an optional keyword check (mode + value);
+  invalid `regex` patterns are rejected at save time, not at run time.
+- The DNS monitor form accepts an optional expected-value check and the
+  eight conditions in §15.2.4.
+- A configured ICMP ping monitor produces successful checks on a host whose
+  `net.ipv4.ping_group_range` covers the service group, and returns a
+  Runner-level error (logged, surfaced in the TUI as misconfigured) on a
+  host where the socket cannot be opened.
+- Migration `0002_check_result_details.sql` applies cleanly to a v0.1.0
+  database and backfills `http_status_code` rows into `details` as
+  `{"status_code": N}`.
+- Per-type summary lines (HTTP status code, TCP remote address, ICMP RTT,
+  DNS rcode + records) are visible on the monitor detail screen, sourced
+  from `Details`.
+- Existing TSDB queries continue to work; no new series are introduced.
+
 ## 29. Revision history
 
 ```text
@@ -1916,4 +2345,15 @@ An implementation satisfies this SPEC when:
       container entrypoint with an empty command, so the `service` subcommand is
       supplied as a runtime argument by the deployment rather than baked into
       the image.
+0.4 - Added three monitor types and an HTTP keyword extension for release
+      0.2.0. Restructured §11.2 into per-type config payloads (§11.2.1–§11.2.5)
+      and replaced `CheckResult.HTTPStatusCode` with `Details json.RawMessage`
+      (§11.3, §15.3). Replaced `check_results.http_status_code` with
+      `details TEXT` and documented migration 0002 (§12.3, §13.4). Reorganised
+      §15 into Runner registry + per-type runners (HTTP+keyword, TCP, ICMP
+      ping, DNS) and distinguished per-check failures from Runner-level errors
+      (§15.4). Added §21.4 documenting the `net.ipv4.ping_group_range`
+      requirement for unprivileged ICMP. Added §27.1 resolutions, §28.1
+      acceptance criteria, and Milestone 8 (§26). Probe directory layout in §5
+      expanded to `details.go`, `dns.go`, `http.go`, `ping.go`, `tcp.go`.
 ```
