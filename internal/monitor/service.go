@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 )
 
@@ -243,15 +242,9 @@ func (s *Service) notify(kind ChangeKind, m *Monitor) {
 	}
 }
 
-// validateInput checks a monitor's type-agnostic fields and its HTTP config.
+// validateInput delegates to ValidateMonitor, which since v0.2.0 dispatches
+// the per-type config validator (SPEC §11.2.5). Kept as a thin wrapper so the
+// service call sites remain readable; the indirection has no runtime cost.
 func validateInput(m *Monitor) error {
-	if err := ValidateMonitor(m); err != nil {
-		return err
-	}
-	// ValidateMonitor guarantees the type is HTTP, the only MVP monitor type.
-	var cfg HTTPMonitorConfig
-	if err := json.Unmarshal(m.Config, &cfg); err != nil {
-		return &FieldError{Field: "config", Message: "must be valid JSON"}
-	}
-	return ValidateHTTPConfig(&cfg)
+	return ValidateMonitor(m)
 }

@@ -768,7 +768,7 @@ done.
   absent.
   *Context:* SPEC §11.2.1–11.2.5; `internal/monitor/model.go`.
 
-- [ ] **M11.2 — Per-type config validation** — *deps: M11.1*
+- [x] **M11.2 — Per-type config validation** — *deps: M11.1*
   Extend `internal/monitor/validate.go` to validate each type-specific
   config per SPEC §11.2.1–11.2.4: HTTP `BodyCap` bounds and keyword regex
   compiles at validation time; TCP host + port range; ICMP host + packet
