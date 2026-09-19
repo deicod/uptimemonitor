@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 
 // checkResultColumns is the shared column list for check_results reads/writes.
 const checkResultColumns = `id, monitor_id, started_at, finished_at, ` +
-	`duration_ms, success, state, error, http_status_code`
+	`duration_ms, success, state, error, details`
 
 // CheckResultRepo provides insert, recent-list, and prune access to the
 // check_results table (SPEC §12.3). Raw SQL is confined to this package per
@@ -33,7 +34,7 @@ func (r *CheckResultRepo) Insert(ctx context.Context, cr *monitor.CheckResult) e
 		cr.ID, cr.MonitorID,
 		cr.StartedAt.UTC().Format(timeLayout), cr.FinishedAt.UTC().Format(timeLayout),
 		cr.Duration.Milliseconds(), boolToInt(cr.Success), string(cr.State),
-		nullText(cr.Error), nullInt(cr.HTTPStatusCode),
+		nullText(cr.Error), nullText(string(cr.Details)),
 	)
 	if err != nil {
 		return fmt.Errorf("sqlite: insert check_result %s: %w", cr.ID, err)
@@ -99,11 +100,11 @@ func scanCheckResult(s scannable) (*monitor.CheckResult, error) {
 		success    int
 		state      string
 		errText    sql.NullString
-		statusCode sql.NullInt64
+		details    sql.NullString
 	)
 	if err := s.Scan(
 		&cr.ID, &cr.MonitorID, &startedAt, &finishedAt,
-		&durationMs, &success, &state, &errText, &statusCode,
+		&durationMs, &success, &state, &errText, &details,
 	); err != nil {
 		return nil, err
 	}
@@ -114,9 +115,8 @@ func scanCheckResult(s scannable) (*monitor.CheckResult, error) {
 	if errText.Valid {
 		cr.Error = errText.String
 	}
-	if statusCode.Valid {
-		code := int(statusCode.Int64)
-		cr.HTTPStatusCode = &code
+	if details.Valid {
+		cr.Details = json.RawMessage(details.String)
 	}
 
 	var err error

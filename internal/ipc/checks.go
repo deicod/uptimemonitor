@@ -2,6 +2,7 @@ package ipc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -11,17 +12,19 @@ import (
 )
 
 // CheckResultResponse is the DTO for a single check observation
-// (SPEC §11.3, §10.5).
+// (SPEC §11.3, §10.5). Details is the runner's type-specific payload
+// (SPEC §15.3), passed through verbatim; its schema follows the monitor's
+// type.
 type CheckResultResponse struct {
-	ID             string    `json:"id"`
-	MonitorID      string    `json:"monitor_id"`
-	StartedAt      time.Time `json:"started_at"`
-	FinishedAt     time.Time `json:"finished_at"`
-	DurationMs     int64     `json:"duration_ms"`
-	Success        bool      `json:"success"`
-	State          string    `json:"state"`
-	Error          string    `json:"error,omitempty"`
-	HTTPStatusCode *int      `json:"http_status_code,omitempty"`
+	ID         string          `json:"id"`
+	MonitorID  string          `json:"monitor_id"`
+	StartedAt  time.Time       `json:"started_at"`
+	FinishedAt time.Time       `json:"finished_at"`
+	DurationMs int64           `json:"duration_ms"`
+	Success    bool            `json:"success"`
+	State      string          `json:"state"`
+	Error      string          `json:"error,omitempty"`
+	Details    json.RawMessage `json:"details,omitempty"`
 }
 
 // CheckResultListResponse is the DTO returned by GET /v1/monitors/{id}/checks.
@@ -120,14 +123,14 @@ func mapRepoError(err error) *APIError {
 
 func checkResultToResponse(c *monitor.CheckResult) CheckResultResponse {
 	return CheckResultResponse{
-		ID:             c.ID,
-		MonitorID:      c.MonitorID,
-		StartedAt:      c.StartedAt,
-		FinishedAt:     c.FinishedAt,
-		DurationMs:     c.Duration.Milliseconds(),
-		Success:        c.Success,
-		State:          string(c.State),
-		Error:          c.Error,
-		HTTPStatusCode: c.HTTPStatusCode,
+		ID:         c.ID,
+		MonitorID:  c.MonitorID,
+		StartedAt:  c.StartedAt,
+		FinishedAt: c.FinishedAt,
+		DurationMs: c.Duration.Milliseconds(),
+		Success:    c.Success,
+		State:      string(c.State),
+		Error:      c.Error,
+		Details:    c.Details,
 	}
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/deicod/uptimemonitor/internal/monitor"
 	"github.com/deicod/uptimemonitor/internal/notify"
+	"github.com/deicod/uptimemonitor/internal/probe"
 	"github.com/deicod/uptimemonitor/internal/store/tsdb"
 )
 
@@ -156,7 +157,13 @@ func (p *Pipeline) run(ctx context.Context, m monitor.Monitor) error {
 		// A dispatcher-level error means we never produced a Result (unknown
 		// monitor type, malformed config). Record it as a failed check so the
 		// pipeline still runs the state machine and the operator can see the
-		// failure in the TUI rather than a silent gap.
+		// failure in the TUI rather than a silent gap; the cause goes to the
+		// log because the check row only carries a generic message.
+		p.logger.Error("probe dispatch failed",
+			"monitor_id", m.ID,
+			"monitor_type", string(m.Type),
+			"error", derr.Error(),
+		)
 		now := time.Now().UTC()
 		cr = monitor.CheckResult{
 			ID:         monitor.NewID(),
@@ -202,7 +209,7 @@ func (p *Pipeline) run(ctx context.Context, m monitor.Monitor) error {
 		FinishedAt:     now,
 		Success:        cr.Success,
 		Duration:       cr.Duration,
-		HTTPStatusCode: cr.HTTPStatusCode,
+		HTTPStatusCode: httpStatusCode(m, cr.Details),
 	}); err != nil {
 		p.logger.Error("write tsdb samples",
 			"monitor_id", m.ID,
@@ -277,6 +284,20 @@ func (p *Pipeline) run(ctx context.Context, m monitor.Monitor) error {
 		return fmt.Errorf("pipeline: upsert monitor_state: %w", err)
 	}
 	return nil
+}
+
+// httpStatusCode extracts the status code for the TSDB status series, which
+// exists for HTTP monitors only (SPEC §14.2). Other monitor types, and HTTP
+// checks that received no response, yield nil so the sample is omitted.
+func httpStatusCode(m monitor.Monitor, details json.RawMessage) *int {
+	if m.Type != monitor.MonitorTypeHTTP || len(details) == 0 {
+		return nil
+	}
+	var d probe.HTTPDetails
+	if err := json.Unmarshal(details, &d); err != nil {
+		return nil
+	}
+	return d.StatusCode
 }
 
 // enqueueNotification queues msg for delivery, applying the global toggle (the

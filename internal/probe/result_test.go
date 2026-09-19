@@ -23,8 +23,8 @@ func TestResultZeroValue(t *testing.T) {
 	if r.Error != "" {
 		t.Errorf("zero Result.Error = %q, want empty", r.Error)
 	}
-	if r.HTTPStatusCode != nil {
-		t.Errorf("zero Result.HTTPStatusCode = %v, want nil", r.HTTPStatusCode)
+	if r.Details != nil {
+		t.Errorf("zero Result.Details = %s, want nil", r.Details)
 	}
 	if !r.StartedAt.IsZero() || !r.FinishedAt.IsZero() {
 		t.Errorf("zero Result timestamps not zero: started=%v finished=%v", r.StartedAt, r.FinishedAt)
@@ -36,20 +36,17 @@ func TestResultZeroValue(t *testing.T) {
 
 // TestResultJSONRoundTrip ensures a populated Result survives JSON encoding so
 // it can cross IPC and storage boundaries without losing fields — especially
-// the optional HTTPStatusCode pointer, which must round-trip rather than
-// silently degrade to 0.
+// the type-specific Details payload, which must round-trip verbatim.
 func TestResultJSONRoundTrip(t *testing.T) {
 	started := time.Date(2026, 5, 20, 10, 30, 0, 0, time.UTC)
 	finished := started.Add(123 * time.Millisecond)
-	status := 200
-
 	want := probe.Result{
-		StartedAt:      started,
-		FinishedAt:     finished,
-		Duration:       finished.Sub(started),
-		Success:        true,
-		Error:          "",
-		HTTPStatusCode: &status,
+		StartedAt:  started,
+		FinishedAt: finished,
+		Duration:   finished.Sub(started),
+		Success:    true,
+		Error:      "",
+		Details:    json.RawMessage(`{"status_code":200}`),
 	}
 
 	data, err := json.Marshal(want)
@@ -77,8 +74,8 @@ func TestResultJSONRoundTrip(t *testing.T) {
 	if got.Error != want.Error {
 		t.Errorf("Error: got %q, want %q", got.Error, want.Error)
 	}
-	if got.HTTPStatusCode == nil || *got.HTTPStatusCode != *want.HTTPStatusCode {
-		t.Errorf("HTTPStatusCode: got %v, want %v", got.HTTPStatusCode, want.HTTPStatusCode)
+	if string(got.Details) != string(want.Details) {
+		t.Errorf("Details: got %s, want %s", got.Details, want.Details)
 	}
 }
 

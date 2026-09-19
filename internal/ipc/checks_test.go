@@ -238,15 +238,14 @@ func TestListMonitorChecksHandlerRepoError(t *testing.T) {
 }
 
 func sampleCheckResult() *monitor.CheckResult {
-	code := 200
 	return &monitor.CheckResult{
-		ID:             "01HXCHECK",
-		MonitorID:      "01HX",
-		StartedAt:      time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC),
-		FinishedAt:     time.Date(2026, 5, 21, 12, 0, 0, 42_000_000, time.UTC),
-		Duration:       42 * time.Millisecond,
-		Success:        true,
-		State:          monitor.StateUp,
-		HTTPStatusCode: &code,
+		ID:         "01HXCHECK",
+		MonitorID:  "01HX",
+		StartedAt:  time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC),
+		FinishedAt: time.Date(2026, 5, 21, 12, 0, 0, 42_000_000, time.UTC),
+		Duration:   42 * time.Millisecond,
+		Success:    true,
+		State:      monitor.StateUp,
+		Details:    json.RawMessage(`{"status_code":200}`),
 	}
 }

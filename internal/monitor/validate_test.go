@@ -77,10 +77,12 @@ func TestValidateMonitor(t *testing.T) {
 			m.Type = MonitorTypeDNS
 			m.Config = mustJSON(*validDNSConfig())
 		}, ""},
+		// The monitor name is valid here, so the error must come from the DNS
+		// validator — and must say config.name, not the monitor's own name.
 		{"dns dispatches to dns validator", func(m *Monitor) {
 			m.Type = MonitorTypeDNS
 			m.Config = mustJSON(DNSMonitorConfig{Name: "", RecordType: DNSRecordA})
-		}, "name"},
+		}, "config.name"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -184,6 +186,10 @@ func TestValidateTCPConfig(t *testing.T) {
 		{"hostname starting with hyphen rejected", func(c *TCPMonitorConfig) { c.Host = "-bad.example.com" }, "host"},
 		{"hostname underscore rejected", func(c *TCPMonitorConfig) { c.Host = "bad_label.example.com" }, "host"},
 		{"hostname too long rejected", func(c *TCPMonitorConfig) { c.Host = strings.Repeat("a", 254) }, "host"},
+		// The port has its own field; a host carrying one (or IPv6 brackets,
+		// which only make sense next to a port) would be dialled wrongly.
+		{"host with port rejected", func(c *TCPMonitorConfig) { c.Host = "example.com:22" }, "host"},
+		{"bracketed ipv6 rejected", func(c *TCPMonitorConfig) { c.Host = "[2001:db8::1]" }, "host"},
 		{"port zero", func(c *TCPMonitorConfig) { c.Port = 0 }, "port"},
 		{"port negative", func(c *TCPMonitorConfig) { c.Port = -1 }, "port"},
 		{"port too high", func(c *TCPMonitorConfig) { c.Port = 65536 }, "port"},
@@ -293,14 +299,36 @@ func TestValidateDNSConfig(t *testing.T) {
 		wantField string
 	}{
 		{"valid baseline", func(*DNSMonitorConfig) {}, ""},
-		{"empty name", func(c *DNSMonitorConfig) { c.Name = "" }, "name"},
-		{"invalid name", func(c *DNSMonitorConfig) { c.Name = "bad host.example.com" }, "name"},
+		// The query name reports as config.name: a bare "name" would point the
+		// operator at the monitor's display name instead.
+		{"empty name", func(c *DNSMonitorConfig) { c.Name = "" }, "config.name"},
+		{"invalid name", func(c *DNSMonitorConfig) { c.Name = "bad host.example.com" }, "config.name"},
+		{"name label too long", func(c *DNSMonitorConfig) { c.Name = strings.Repeat("a", 64) + ".example.com" }, "config.name"},
+		{"name with leading hyphen label", func(c *DNSMonitorConfig) { c.Name = "-bad.example.com" }, "config.name"},
+		{"name with empty label", func(c *DNSMonitorConfig) { c.Name = "a..example.com" }, "config.name"},
+		{"underscore name accepted", func(c *DNSMonitorConfig) { c.Name = "_dmarc.example.com" }, ""},
+		{"fqdn trailing dot accepted", func(c *DNSMonitorConfig) { c.Name = "example.com." }, ""},
 		{"unsupported record type", func(c *DNSMonitorConfig) { c.RecordType = "SRV" }, "record_type"},
+		{"ANY rejected", func(c *DNSMonitorConfig) { c.RecordType = "ANY" }, "record_type"},
+		{"AXFR rejected", func(c *DNSMonitorConfig) { c.RecordType = "AXFR" }, "record_type"},
+		{"lowercase record type rejected", func(c *DNSMonitorConfig) { c.RecordType = "soa" }, "record_type"},
 		{"empty record type", func(c *DNSMonitorConfig) { c.RecordType = "" }, "record_type"},
 		{"resolver omitted accepted", func(c *DNSMonitorConfig) { c.Resolver = "" }, ""},
 		{"resolver host:port accepted", func(c *DNSMonitorConfig) { c.Resolver = "1.1.1.1:53" }, ""},
 		{"resolver ipv6 bracketed accepted", func(c *DNSMonitorConfig) { c.Resolver = "[2001:db8::1]:53" }, ""},
-		{"resolver without port", func(c *DNSMonitorConfig) { c.Resolver = "1.1.1.1" }, "resolver"},
+		// A resolver without a port defaults to 53, so an operator can point a
+		// monitor at "ns1.example.com" directly.
+		{"resolver ipv4 without port accepted", func(c *DNSMonitorConfig) { c.Resolver = "1.1.1.1" }, ""},
+		{"resolver hostname without port accepted", func(c *DNSMonitorConfig) { c.Resolver = "ns1.example.com" }, ""},
+		{"resolver hostname with port accepted", func(c *DNSMonitorConfig) { c.Resolver = "ns1.example.com:5353" }, ""},
+		{"resolver bare ipv6 accepted", func(c *DNSMonitorConfig) { c.Resolver = "2001:db8::1" }, ""},
+		{"resolver bracketed ipv6 without port accepted", func(c *DNSMonitorConfig) { c.Resolver = "[2001:db8::1]" }, ""},
+		{"resolver brackets around ipv4", func(c *DNSMonitorConfig) { c.Resolver = "[1.1.1.1]" }, "resolver"},
+		{"resolver bad hostname", func(c *DNSMonitorConfig) { c.Resolver = "bad host" }, "resolver"},
+		{"resolver underscore hostname", func(c *DNSMonitorConfig) { c.Resolver = "_ns.example.com" }, "resolver"},
+		{"resolver empty host with port", func(c *DNSMonitorConfig) { c.Resolver = ":53" }, "resolver"},
+		{"resolver empty port", func(c *DNSMonitorConfig) { c.Resolver = "1.1.1.1:" }, "resolver"},
+		{"resolver unbalanced bracket", func(c *DNSMonitorConfig) { c.Resolver = "[2001:db8::1:53" }, "resolver"},
 		{"resolver port not numeric", func(c *DNSMonitorConfig) { c.Resolver = "1.1.1.1:dns" }, "resolver"},
 		{"resolver port zero", func(c *DNSMonitorConfig) { c.Resolver = "1.1.1.1:0" }, "resolver"},
 		{"resolver port too high", func(c *DNSMonitorConfig) { c.Resolver = "1.1.1.1:70000" }, "resolver"},
@@ -323,7 +351,7 @@ func TestValidateDNSConfig(t *testing.T) {
 	// be accepted; otherwise the dispatch table and the validator would
 	// silently disagree.
 	t.Run("all record types accepted", func(t *testing.T) {
-		for _, rt := range []DNSRecordType{DNSRecordA, DNSRecordAAAA, DNSRecordCNAME, DNSRecordMX, DNSRecordTXT, DNSRecordNS} {
+		for _, rt := range []DNSRecordType{DNSRecordA, DNSRecordAAAA, DNSRecordCNAME, DNSRecordMX, DNSRecordTXT, DNSRecordNS, DNSRecordSOA} {
 			c := validDNSConfig()
 			c.RecordType = rt
 			if err := ValidateDNSConfig(c); err != nil {
@@ -368,5 +396,34 @@ func assertField(t *testing.T, err error, wantField string) {
 	}
 	if fe.Field != wantField {
 		t.Errorf("error field = %q, want %q", fe.Field, wantField)
+	}
+}
+
+// TestResolverAddress pins the normalised address the DNS runner dials for
+// each accepted resolver spelling: the default port is 53 and IPv6 hosts are
+// always bracketed, so the runner never has to re-parse the setting.
+func TestResolverAddress(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"ns1.example.com", "ns1.example.com:53"},
+		{"ns1.example.com.", "ns1.example.com.:53"},
+		{"ns1.example.com:5353", "ns1.example.com:5353"},
+		{"192.0.2.1", "192.0.2.1:53"},
+		{"192.0.2.1:53", "192.0.2.1:53"},
+		{"2001:db8::1", "[2001:db8::1]:53"},
+		{"[2001:db8::1]", "[2001:db8::1]:53"},
+		{"[2001:db8::1]:5353", "[2001:db8::1]:5353"},
+	}
+	for _, tc := range cases {
+		got, err := ResolverAddress(tc.in)
+		if err != nil {
+			t.Errorf("ResolverAddress(%q): unexpected error %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("ResolverAddress(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

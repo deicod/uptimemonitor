@@ -100,15 +100,14 @@ func insertSampleMonitor(t *testing.T, store *sqlite.Store) string {
 }
 
 func buildCheck(monitorID string, startedAt time.Time) *monitor.CheckResult {
-	status := 200
 	return &monitor.CheckResult{
-		ID:             monitor.NewID(),
-		MonitorID:      monitorID,
-		StartedAt:      startedAt,
-		FinishedAt:     startedAt.Add(150 * time.Millisecond),
-		Duration:       150 * time.Millisecond,
-		Success:        true,
-		State:          monitor.StateUp,
-		HTTPStatusCode: &status,
+		ID:         monitor.NewID(),
+		MonitorID:  monitorID,
+		StartedAt:  startedAt,
+		FinishedAt: startedAt.Add(150 * time.Millisecond),
+		Duration:   150 * time.Millisecond,
+		Success:    true,
+		State:      monitor.StateUp,
+		Details:    json.RawMessage(`{"status_code":200}`),
 	}
 }

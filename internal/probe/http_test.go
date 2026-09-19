@@ -65,8 +65,8 @@ func TestHTTPRunnerInRangeStatusIsSuccess(t *testing.T) {
 	if !res.Success {
 		t.Errorf("Success = false, want true (status 200 in 200-299)")
 	}
-	if res.HTTPStatusCode == nil || *res.HTTPStatusCode != 200 {
-		t.Errorf("HTTPStatusCode = %v, want 200", res.HTTPStatusCode)
+	if got := httpStatus(t, res.Details); got == nil || *got != 200 {
+		t.Errorf("details status_code = %v, want 200 (details %s)", got, res.Details)
 	}
 	if res.Error != "" {
 		t.Errorf("Error = %q, want empty on success", res.Error)
@@ -97,8 +97,8 @@ func TestHTTPRunnerOutOfRangeStatusIsFailure(t *testing.T) {
 	if res.Success {
 		t.Errorf("Success = true, want false (status 500 outside 200-299)")
 	}
-	if res.HTTPStatusCode == nil || *res.HTTPStatusCode != 500 {
-		t.Errorf("HTTPStatusCode = %v, want 500", res.HTTPStatusCode)
+	if got := httpStatus(t, res.Details); got == nil || *got != 500 {
+		t.Errorf("details status_code = %v, want 500 (details %s)", got, res.Details)
 	}
 	if res.Error == "" {
 		t.Error("Error empty, want a description of the out-of-range status")
@@ -127,8 +127,8 @@ func TestHTTPRunnerTimeoutIsFailure(t *testing.T) {
 	if res.Success {
 		t.Errorf("Success = true, want false on timeout")
 	}
-	if res.HTTPStatusCode != nil {
-		t.Errorf("HTTPStatusCode = %v, want nil (no response received)", res.HTTPStatusCode)
+	if got := httpStatus(t, res.Details); got != nil {
+		t.Errorf("details status_code = %v, want absent (no response received)", *got)
 	}
 	if res.Error == "" {
 		t.Error("Error empty, want a sanitised timeout description")
@@ -152,8 +152,8 @@ func TestHTTPRunnerBadHostIsSanitisedFailure(t *testing.T) {
 	if res.Success {
 		t.Errorf("Success = true, want false on DNS failure")
 	}
-	if res.HTTPStatusCode != nil {
-		t.Errorf("HTTPStatusCode = %v, want nil", res.HTTPStatusCode)
+	if got := httpStatus(t, res.Details); got != nil {
+		t.Errorf("details status_code = %v, want absent", *got)
 	}
 	if res.Error == "" {
 		t.Error("Error empty, want a sanitised description of the failure")
@@ -179,4 +179,16 @@ func TestHTTPRunnerMalformedConfigReturnsError(t *testing.T) {
 	if _, err := probe.NewHTTPRunner().Run(context.Background(), m); err == nil {
 		t.Error("Run with malformed config returned nil error, want error")
 	}
+}
+
+// httpStatus decodes the status code from an HTTP runner's Details payload.
+// Every HTTP result must carry decodable Details (SPEC §15.3), so a missing
+// or malformed payload fails the test rather than reading as "no status".
+func httpStatus(t *testing.T, details json.RawMessage) *int {
+	t.Helper()
+	var d probe.HTTPDetails
+	if err := json.Unmarshal(details, &d); err != nil {
+		t.Fatalf("decode HTTP details %q: %v", details, err)
+	}
+	return d.StatusCode
 }

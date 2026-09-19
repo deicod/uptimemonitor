@@ -3,6 +3,7 @@ package probe_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,11 +44,11 @@ func TestDispatcherRoutesByMonitorType(t *testing.T) {
 	stub := &recordingRunner{
 		typ: monitor.MonitorTypeHTTP,
 		res: probe.Result{
-			StartedAt:      started,
-			FinishedAt:     finished,
-			Duration:       finished.Sub(started),
-			Success:        true,
-			HTTPStatusCode: &status,
+			StartedAt:  started,
+			FinishedAt: finished,
+			Duration:   finished.Sub(started),
+			Success:    true,
+			Details:    json.RawMessage(fmt.Sprintf(`{"status_code":%d}`, status)),
 		},
 	}
 
@@ -74,8 +75,8 @@ func TestDispatcherRoutesByMonitorType(t *testing.T) {
 	if !cr.Success {
 		t.Error("CheckResult.Success = false, want true (carried from probe.Result)")
 	}
-	if cr.HTTPStatusCode == nil || *cr.HTTPStatusCode != 200 {
-		t.Errorf("CheckResult.HTTPStatusCode = %v, want 200", cr.HTTPStatusCode)
+	if string(cr.Details) != `{"status_code":200}` {
+		t.Errorf("CheckResult.Details = %s, want the runner's payload verbatim", cr.Details)
 	}
 	if cr.Duration != finished.Sub(started) {
 		t.Errorf("CheckResult.Duration = %v, want %v", cr.Duration, finished.Sub(started))
@@ -148,7 +149,7 @@ func TestNewDispatcherIncludesHTTPRunner(t *testing.T) {
 	if !cr.Success {
 		t.Errorf("CheckResult.Success = false, want true")
 	}
-	if cr.HTTPStatusCode == nil || *cr.HTTPStatusCode != 200 {
-		t.Errorf("CheckResult.HTTPStatusCode = %v, want 200", cr.HTTPStatusCode)
+	if got := httpStatus(t, cr.Details); got == nil || *got != 200 {
+		t.Errorf("CheckResult details status_code = %v, want 200", got)
 	}
 }

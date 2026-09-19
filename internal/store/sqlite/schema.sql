@@ -38,7 +38,7 @@ CREATE TABLE check_results (
     success INTEGER NOT NULL,
     state TEXT NOT NULL,
     error TEXT,
-    http_status_code INTEGER
+    details TEXT -- type-specific probe payload (SPEC §15.3)
 );
 
 CREATE INDEX idx_check_results_monitor_started

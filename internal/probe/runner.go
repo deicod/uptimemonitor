@@ -30,12 +30,16 @@ type Dispatcher struct {
 	runners map[monitor.MonitorType]Runner
 }
 
-// NewDispatcher returns a Dispatcher pre-registered with the MVP HTTP runner
-// (SPEC §15.2). Tests and future monitor types can override or extend the
-// registry via Register before the dispatcher is shared with other goroutines.
+// NewDispatcher returns a Dispatcher pre-registered with the HTTP, TCP, and
+// DNS runners (SPEC §15.2). The ICMP ping runner is not implemented yet, so a
+// ping monitor fails dispatch explicitly rather than falling back to another
+// probe. Tests can override or extend the registry via Register before the
+// dispatcher is shared with other goroutines.
 func NewDispatcher() *Dispatcher {
 	d := &Dispatcher{runners: make(map[monitor.MonitorType]Runner)}
 	d.Register(NewHTTPRunner())
+	d.Register(NewTCPRunner())
+	d.Register(NewDNSRunner())
 	return d
 }
 
@@ -61,13 +65,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, m monitor.Monitor) (monitor.C
 		return monitor.CheckResult{}, err
 	}
 	return monitor.CheckResult{
-		ID:             monitor.NewID(),
-		MonitorID:      m.ID,
-		StartedAt:      res.StartedAt,
-		FinishedAt:     res.FinishedAt,
-		Duration:       res.Duration,
-		Success:        res.Success,
-		Error:          res.Error,
-		HTTPStatusCode: res.HTTPStatusCode,
+		ID:         monitor.NewID(),
+		MonitorID:  m.ID,
+		StartedAt:  res.StartedAt,
+		FinishedAt: res.FinishedAt,
+		Duration:   res.Duration,
+		Success:    res.Success,
+		Error:      res.Error,
+		Details:    res.Details,
 	}, nil
 }

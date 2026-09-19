@@ -43,11 +43,10 @@ func sampleDetailEvents() []ipc.EventResponse {
 // sampleDetailChecks is a representative recent-checks list for the detail
 // tests; the first entry is treated as the live state by the detail screen.
 func sampleDetailChecks() []ipc.CheckResultResponse {
-	status := 200
 	now := time.Now()
 	return []ipc.CheckResultResponse{
 		{ID: "c2", MonitorID: "01A", StartedAt: now.Add(-1 * time.Minute), FinishedAt: now.Add(-1 * time.Minute).Add(120 * time.Millisecond),
-			DurationMs: 120, Success: true, State: "up", HTTPStatusCode: &status},
+			DurationMs: 120, Success: true, State: "up", Details: json.RawMessage(`{"status_code":200}`)},
 		{ID: "c1", MonitorID: "01A", StartedAt: now.Add(-2 * time.Minute), FinishedAt: now.Add(-2 * time.Minute).Add(800 * time.Millisecond),
 			DurationMs: 800, Success: false, State: "down", Error: "dial tcp: connection refused"},
 	}
