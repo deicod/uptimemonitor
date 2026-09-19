@@ -231,3 +231,27 @@ func TestMigrateCheckResultDetailsUpgrade(t *testing.T) {
 		t.Errorf("newest row = %s %q, want c-transport with its error preserved", got[0].ID, got[0].Error)
 	}
 }
+
+// TestCheckResultsStoreOnlyDetails pins the migrated check_results columns:
+// type-specific observations persist only in details, so the deprecated /v1
+// http_status_code field must stay derived rather than regain a column.
+func TestCheckResultsStoreOnlyDetails(t *testing.T) {
+	store := openMigrated(t)
+	rows, err := store.DB().Query("SELECT name FROM pragma_table_info('check_results') ORDER BY cid")
+	if err != nil {
+		t.Fatalf("table_info: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var cols []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		cols = append(cols, name)
+	}
+	want := "id,monitor_id,started_at,finished_at,duration_ms,success,state,error,details"
+	if got := strings.Join(cols, ","); got != want {
+		t.Errorf("check_results columns = %s, want %s", got, want)
+	}
+}

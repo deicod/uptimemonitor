@@ -781,6 +781,11 @@ done.
   *Tests first:* table-driven per type, one row per rule plus a valid
   baseline; an invalid `regex` pattern fails at validation time, not at run
   time; each `DNSMatchCondition` constant is accepted.
+  *As built:* `ValidateMonitor` refuses `ping` with a `type` error until the
+  ICMP runner exists; `ValidateICMPPingConfig` is kept but not wired. M11.9
+  must re-enable `ping` in `isSupportedMonitorType`/`validateConfigByType`
+  when it registers the runner — `TestValidationAcceptsOnlyRunnableTypes`
+  enforces that pairing.
   *Context:* SPEC §11.2; `internal/monitor/validate.go`.
 
 - [x] **M11.3 — Migration 0002: check_result details** — *deps: M10.6*
@@ -896,10 +901,11 @@ done.
   *Context:* SPEC §15.2.3, §24.2; `internal/probe/`.
 
 - [ ] **M11.9 — Dispatcher registers all four runners** — *deps: M11.5, M11.6, M11.7, M11.8*
-  *Status:* HTTP, TCP, and DNS are registered and an unregistered type
-  (ping) fails dispatch explicitly, with the cause logged by the pipeline.
-  The ICMP runner and the misconfigured (no state change) handling of
-  Runner-level errors remain open.
+  *Status:* HTTP, TCP, and DNS are registered. Validation refuses `ping`
+  until its runner exists; a ping monitor stored earlier fails dispatch
+  explicitly, with the cause logged by the pipeline. The ICMP runner,
+  re-enabling `ping` in validation (see M11.2), and the misconfigured
+  (no state change) handling of Runner-level errors remain open.
   Update `internal/probe/runner.go` `NewDispatcher()` to register the four
   v0.2.0 runners (HTTP, TCP, ICMP ping, DNS). Update the check pipeline
   (`internal/pipeline/`) so that Runner-level errors are logged and
@@ -925,6 +931,10 @@ done.
   name error reports `config.name`);
   `GET /v1/monitors/{id}/checks` returns `details` per row; client decodes
   `Details` as opaque JSON without losing fields.
+  *As built:* `/v1` stays backward-compatible (SPEC §10.4): check rows keep
+  a deprecated `http_status_code`, derived from `details` for HTTP checks
+  only and never stored. `ping` creation returns a `type` validation error
+  until the ICMP runner exists; the other types are covered by tests.
   *Context:* SPEC §10.5, §11.2; `internal/ipc/`.
 
 - [ ] **M11.11 — TUI monitor form: type selector + per-type field groups** — *deps: M11.10*
@@ -1040,5 +1050,8 @@ done.
       deviations: the DNS runner uses dnsmessage rather than net.Resolver,
       the pipeline (not the TSDB writer) extracts the HTTP status, and the
       migration file carries an Atlas timestamp name. Added status notes to
-      the partially done M11.9, M11.11, M11.12, and M11.14.
+      the partially done M11.9, M11.11, M11.12, and M11.14. Recorded the
+      pre-merge fixes: the deprecated /v1 http_status_code compatibility
+      field, ping refused at validation until its runner exists, and fair
+      per-nameserver timeout shares for the system resolver.
 ```

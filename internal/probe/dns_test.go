@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -451,6 +452,8 @@ func TestDNSRunnerTimeoutAndCancellation(t *testing.T) {
 	res, d := runDNS(t, context.Background(), runnerFor(), dnsMonitor(t, cfg, 200*time.Millisecond))
 	if elapsed := time.Since(start); res.Success || res.Error != "dns query: timed out" || elapsed > 2*time.Second {
 		t.Errorf("timeout: Success=%v Error=%q after %v, want %q near 200ms", res.Success, res.Error, elapsed, "dns query: timed out")
+	} else if elapsed < 190*time.Millisecond {
+		t.Errorf("timeout: gave up after %v; an explicit resolver must get the whole 200ms", elapsed)
 	}
 	if d.Server != srv.addr || d.RCode != "" {
 		t.Errorf("timeout details = %+v, want server %s and no rcode", d, srv.addr)
@@ -722,4 +725,130 @@ func TestDescribeDNSError(t *testing.T) {
 			t.Errorf("describeDNSError(%v) = %q, want %q", tc.err, got, tc.want)
 		}
 	}
+}
+
+// silentServer starts a DNS server that never answers.
+func silentServer(t *testing.T) *dnsTestServer {
+	t.Helper()
+	return startDNSServer(t, func(dnsmessage.Question, bool) dnsReply { return dnsReply{drop: true} })
+}
+
+// assertGoroutinesSettle fails unless the goroutine count drops back to
+// baseline shortly after a probe: the runner must not leave readers, timers,
+// or cancellation hooks behind.
+func assertGoroutinesSettle(t *testing.T, baseline int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > baseline {
+		if time.Now().After(deadline) {
+			t.Errorf("goroutines = %d after the probe, want <= %d", runtime.NumGoroutine(), baseline)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestDNSRunnerSystemResolverSkipsSilentServer checks a silent first system
+// nameserver only gets its share of the timeout: the second one is still
+// asked and answers, and the whole check ends within the monitor timeout.
+func TestDNSRunnerSystemResolverSkipsSilentServer(t *testing.T) {
+	silent := silentServer(t)
+	live := startDNSServer(t, answer(record("dysv.de.", &dnsmessage.SOAResource{
+		NS: dnsmessage.MustNewName("ns1.dysv.de."), MBox: dnsmessage.MustNewName("hostmaster.dysv.de."),
+		Serial: 2026091901, Refresh: 7200, Retry: 3600, Expire: 1209600, MinTTL: 3600,
+	})))
+	const timeout = time.Second
+	baseline := runtime.NumGoroutine()
+
+	start := time.Now()
+	res, d := runDNS(t, context.Background(), runnerFor(silent.addr, live.addr),
+		dnsMonitor(t, monitor.DNSMonitorConfig{Name: "dysv.de", RecordType: monitor.DNSRecordSOA}, timeout))
+	elapsed := time.Since(start)
+
+	if !res.Success || d.Server != live.addr || d.Resolver != "system" {
+		t.Fatalf("result %+v details %+v, want success from the second nameserver %s", res, d, live.addr)
+	}
+	if silent.udpQueries.Load() != 1 {
+		t.Errorf("silent nameserver got %d queries, want 1 (tried first)", silent.udpQueries.Load())
+	}
+	if elapsed >= timeout {
+		t.Errorf("check took %v, want it within the %v monitor timeout", elapsed, timeout)
+	}
+	assertGoroutinesSettle(t, baseline)
+}
+
+// TestDNSRunnerSystemResolverAttemptsShareDeadline checks the shares add up
+// to the monitor timeout and no more: with every nameserver silent, each is
+// asked once and the check fails when the one overall deadline passes.
+func TestDNSRunnerSystemResolverAttemptsShareDeadline(t *testing.T) {
+	servers := []*dnsTestServer{silentServer(t), silentServer(t), silentServer(t)}
+	const timeout = 600 * time.Millisecond
+	baseline := runtime.NumGoroutine()
+
+	start := time.Now()
+	res, _ := runDNS(t, context.Background(), runnerFor(servers[0].addr, servers[1].addr, servers[2].addr),
+		dnsMonitor(t, monitor.DNSMonitorConfig{Name: "dysv.de", RecordType: monitor.DNSRecordSOA}, timeout))
+	elapsed := time.Since(start)
+
+	if res.Success || res.Error != "dns query: timed out" {
+		t.Errorf("Success=%v Error=%q, want a timeout", res.Success, res.Error)
+	}
+	for i, srv := range servers {
+		if n := srv.udpQueries.Load(); n != 1 {
+			t.Errorf("nameserver %d got %d queries, want 1", i, n)
+		}
+	}
+	if elapsed < timeout-50*time.Millisecond || elapsed > timeout+250*time.Millisecond {
+		t.Errorf("check took %v, want the full %v monitor timeout and no more", elapsed, timeout)
+	}
+	assertGoroutinesSettle(t, baseline)
+}
+
+// TestDNSRunnerTCPFallbackSharesAttemptBudget checks a TCP retry counts
+// against its nameserver's share: a truncated answer whose TCP retry hangs
+// must not keep the next nameserver from being asked.
+func TestDNSRunnerTCPFallbackSharesAttemptBudget(t *testing.T) {
+	stuck := startDNSServer(t, func(_ dnsmessage.Question, overTCP bool) dnsReply {
+		if overTCP {
+			return dnsReply{delay: 700 * time.Millisecond}
+		}
+		return dnsReply{truncated: true}
+	})
+	live := startDNSServer(t, answer(record("dysv.de.", &dnsmessage.AResource{A: [4]byte{192, 0, 2, 1}})))
+	const timeout = 800 * time.Millisecond
+
+	start := time.Now()
+	res, d := runDNS(t, context.Background(), runnerFor(stuck.addr, live.addr),
+		dnsMonitor(t, monitor.DNSMonitorConfig{Name: "dysv.de", RecordType: monitor.DNSRecordA}, timeout))
+	elapsed := time.Since(start)
+
+	if !res.Success || d.Server != live.addr {
+		t.Fatalf("result %+v details %+v, want success from the second nameserver", res, d)
+	}
+	if stuck.tcpQueries.Load() != 1 {
+		t.Errorf("first nameserver got %d TCP queries, want the fallback tried once", stuck.tcpQueries.Load())
+	}
+	if elapsed >= timeout {
+		t.Errorf("check took %v, want it within the %v monitor timeout", elapsed, timeout)
+	}
+}
+
+// TestDNSRunnerSystemResolverCancellation checks cancelling the check stops
+// at once, without moving on to the remaining nameservers.
+func TestDNSRunnerSystemResolverCancellation(t *testing.T) {
+	first, second := silentServer(t), silentServer(t)
+	baseline := runtime.NumGoroutine()
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+
+	start := time.Now()
+	res, _ := runDNS(t, ctx, runnerFor(first.addr, second.addr),
+		dnsMonitor(t, monitor.DNSMonitorConfig{Name: "dysv.de", RecordType: monitor.DNSRecordSOA}, 30*time.Second))
+	if elapsed := time.Since(start); res.Success || res.Error != "dns query: canceled" || elapsed > 2*time.Second {
+		t.Errorf("Success=%v Error=%q after %v, want %q promptly", res.Success, res.Error, elapsed, "dns query: canceled")
+	}
+	if n := second.udpQueries.Load(); n != 0 {
+		t.Errorf("second nameserver got %d queries after cancellation, want 0", n)
+	}
+	assertGoroutinesSettle(t, baseline)
 }

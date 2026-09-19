@@ -249,3 +249,62 @@ func sampleCheckResult() *monitor.CheckResult {
 		Details:    json.RawMessage(`{"status_code":200}`),
 	}
 }
+
+// TestListMonitorChecksHTTPStatusCompat pins the /v1 compatibility contract
+// (SPEC §10.4, §10.5): a v0.1.0 consumer reading http_status_code still gets
+// it for HTTP checks, derived from details, while details stays the
+// canonical payload for every type. The body is inspected as raw JSON, the
+// way an old client that knows nothing of details would see it.
+func TestListMonitorChecksHTTPStatusCompat(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		typ        monitor.MonitorType
+		details    string
+		wantStatus string // raw JSON of http_status_code; "" = key absent
+	}{
+		{"http with response", monitor.MonitorTypeHTTP, `{"status_code":200}`, "200"},
+		{"http error status", monitor.MonitorTypeHTTP, `{"status_code":503}`, "503"},
+		{"http transport error", monitor.MonitorTypeHTTP, `{}`, ""},
+		{"http row without details", monitor.MonitorTypeHTTP, ``, ""},
+		{"tcp", monitor.MonitorTypeTCP, `{"remote_addr":"192.0.2.53:22"}`, ""},
+		{"dns", monitor.MonitorTypeDNS, `{"name":"dysv.de","record_type":"SOA","resolver":"system","rcode":"NOERROR","answer_count":1}`, ""},
+		// The field is gated on the monitor type, not just on the key.
+		{"tcp details with status_code key", monitor.MonitorTypeTCP, `{"remote_addr":"192.0.2.53:22","status_code":200}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := sampleMonitor()
+			m.Type = tc.typ
+			cr := sampleCheckResult()
+			cr.Details = nil
+			if tc.details != "" {
+				cr.Details = json.RawMessage(tc.details)
+			}
+			mux := NewRouter(fakeStatusProvider{}, &fakeMonitorService{getResult: m}, nil, nil,
+				WithCheckResults(&fakeCheckReader{listResult: []*monitor.CheckResult{cr}}))
+
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/monitors/01HX/checks", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d (body=%q)", rec.Code, rec.Body)
+			}
+			var body struct {
+				Checks []map[string]json.RawMessage `json:"checks"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || len(body.Checks) != 1 {
+				t.Fatalf("decode %s: %v", rec.Body, err)
+			}
+			row := body.Checks[0]
+
+			status, has := row["http_status_code"]
+			if tc.wantStatus == "" && has {
+				t.Errorf("http_status_code = %s, want the key absent", status)
+			}
+			if tc.wantStatus != "" && string(status) != tc.wantStatus {
+				t.Errorf("http_status_code = %q, want %s", status, tc.wantStatus)
+			}
+			if got := string(row["details"]); got != tc.details {
+				t.Errorf("details = %q, want %q verbatim", got, tc.details)
+			}
+		})
+	}
+}

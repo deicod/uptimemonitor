@@ -641,6 +641,31 @@ GET /v1/monitors/{id}/checks?limit=50
 
 Returns recent persisted check summaries from SQLite or a combined SQLite/TSDB view.
 
+Each check carries `details`, the type-specific payload of §15.3, which is
+the canonical representation. For compatibility with v0.1.0 consumers (§10.4)
+HTTP checks that received a response also carry the deprecated
+`http_status_code`, derived from `details` on every read and never stored;
+TCP, DNS, and HTTP checks without a status omit it. New clients should read
+`details`.
+
+```json
+{
+  "checks": [
+    {
+      "id": "01HX...",
+      "monitor_id": "01HX...",
+      "started_at": "2026-09-19T10:00:00Z",
+      "finished_at": "2026-09-19T10:00:00.120Z",
+      "duration_ms": 120,
+      "success": true,
+      "state": "up",
+      "details": { "status_code": 200 },
+      "http_status_code": 200
+    }
+  ]
+}
+```
+
 #### History
 
 ```text
@@ -808,6 +833,10 @@ Validation:
 
 #### 11.2.3 ICMP ping
 
+Not accepted yet: until the ICMP runner (§15.2.3) exists, `ping` monitors
+are refused at validation (§11.2.5). The config shape and rules below are
+the target for that runner.
+
 ```go
 type ICMPPingMonitorConfig struct {
     Host        string `json:"host"`
@@ -889,7 +918,10 @@ These rules apply to every monitor type:
   notification payloads such as the email Subject and into TUI rendering, so
   control characters are rejected at the source to prevent header injection
   (CWE-93) and rendering corruption).
-- `Type`: must be one of `http`, `tcp`, `ping`, `dns`.
+- `Type`: must be one of the executable types `http`, `tcp`, `dns` — those
+  with a probe runner (§15.2). `ping` is defined for the planned ICMP runner
+  but refused with a `type` validation error until that runner exists, so
+  no monitor can be created that would fail every check.
 - `Interval`: positive.
 - `Timeout`: positive; less than `Interval` by default.
 - `Config`: must decode cleanly into the type-specific struct above and pass
@@ -914,7 +946,8 @@ type CheckResult struct {
 The v0.1.0 `HTTPStatusCode *int` field is removed in v0.4. HTTP status code
 now lives inside `Details` as `HTTPDetails.StatusCode`. Migration 0002
 (§13.4) backfills existing rows. The IPC check-result DTO exposes the payload
-as `details` in place of the former `http_status_code` field.
+as `details` and, for /v1 compatibility, keeps a deprecated
+`http_status_code` derived from it for HTTP checks (§10.5).
 
 ### 11.4 Monitor states
 
@@ -1345,11 +1378,12 @@ dns   -> DNS runner (§15.2.4)
 ```
 
 `NewDispatcher()` registers every implemented runner: `http`, `tcp`, and
-`dns`. The ICMP ping runner is not implemented yet; until it is, dispatching
-a `ping` monitor fails with a "no runner registered" error rather than being
-probed by another runner — the pipeline records a failed check ("probe
-configuration error") and logs the cause. Tests may override the registry by
-calling `Register` before sharing the dispatcher across goroutines.
+`dns`. The ICMP ping runner is not implemented yet; until it is, validation
+refuses `ping` monitors (§11.2.5). A `ping` monitor stored before that rule
+fails dispatch with a "no runner registered" error rather than being probed
+by another runner — the pipeline records a failed check ("probe configuration
+error") and logs the cause. Tests may override the registry by calling
+`Register` before sharing the dispatcher across goroutines.
 
 #### 15.2.1 HTTP runner
 
@@ -1435,7 +1469,10 @@ Behavior:
   system resolver. Otherwise the runner queries the system resolver: the
   `nameserver` entries of `/etc/resolv.conf`, tried in order until one
   replies (falling back to `127.0.0.1:53` and `[::1]:53` like the Go
-  resolver). `search`/`ndots` never apply — the configured name is queried as
+  resolver). Each attempt gets an equal share of the time left (remaining
+  time ÷ nameservers still to try), so a silent nameserver cannot starve the
+  ones after it; the last attempt — and so a lone explicit resolver — gets
+  all that is left. `search`/`ndots` never apply — the configured name is queried as
   an absolute name.
 - Issues one query for `Name` of `RecordType`, class IN, with recursion
   desired and an EDNS(0) record advertising a 1232-byte UDP payload. The
@@ -1526,8 +1563,9 @@ The check_result row stores Details as the `details TEXT` column (§12.3). A
 nil `Details` is allowed (v0.1.0 rows without a status code, and checks whose
 dispatch failed); every implemented runner sets a value. The structs live in
 `internal/probe/details.go`; the TUI decodes the fields it renders into its
-own mirror types. The HTTP status sample in the TSDB (§14.2) is read from
-`HTTPDetails` by the check pipeline for HTTP monitors only. IPC consumers
+own mirror types. The HTTP status sample in the TSDB (§14.2) and the
+deprecated `/v1` `http_status_code` (§10.5) are both derived from
+`HTTPDetails` by `probe.HTTPStatusCode`, for HTTP monitors only. IPC consumers
 must understand the schema for their monitor type; the service returns
 Details verbatim and does not normalize across types.
 
@@ -2431,5 +2469,9 @@ In addition to the MVP criteria above, v0.2.0 is satisfied when:
       Extended `DNSDetails` with name, record type, and queried server
       (§15.3). Documented the actual migration 0002 filename (§13.4) and
       that the dispatcher registers http, tcp, and dns until the ICMP runner
-      exists (§15.2).
+      exists (§15.2). Kept /v1 compatible (§10.4): check results carry a
+      deprecated http_status_code derived from details for HTTP (§10.5).
+      Validation refuses ping monitors until the ICMP runner exists
+      (§11.2.5). System nameservers split the monitor timeout into equal
+      per-attempt shares (§15.2.4).
 ```

@@ -1,6 +1,10 @@
 package probe
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/deicod/uptimemonitor/internal/monitor"
+)
 
 // HTTPDetails is the Result.Details payload of the HTTP runner (SPEC §15.3).
 // StatusCode is absent when no response was received.
@@ -32,6 +36,22 @@ type DNSDetails struct {
 	RCode       string   `json:"rcode,omitempty"`
 	AnswerCount int      `json:"answer_count"`
 	Records     []string `json:"records,omitempty"`
+}
+
+// HTTPStatusCode returns the HTTP status recorded in a check's Details, or
+// nil when the monitor is not an HTTP monitor or no response was received.
+// It is the single derivation behind the HTTP-only TSDB status series (SPEC
+// §14.2) and the deprecated /v1 http_status_code field (SPEC §10.5), so the
+// two can never disagree.
+func HTTPStatusCode(t monitor.MonitorType, details json.RawMessage) *int {
+	if t != monitor.MonitorTypeHTTP || len(details) == 0 {
+		return nil
+	}
+	var d HTTPDetails
+	if err := json.Unmarshal(details, &d); err != nil {
+		return nil
+	}
+	return d.StatusCode
 }
 
 // maxDNSDetailRecords bounds DNSDetails.Records so a large answer set cannot

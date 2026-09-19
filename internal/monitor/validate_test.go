@@ -65,14 +65,16 @@ func TestValidateMonitor(t *testing.T) {
 			m.Type = MonitorTypeTCP
 			m.Config = mustJSON(TCPMonitorConfig{Host: "example.com", Port: 0})
 		}, "port"},
-		{"ping valid baseline", func(m *Monitor) {
+		// Ping has no probe runner yet: even a valid ping config is refused on
+		// the type, so no monitor exists that would fail every check.
+		{"ping refused until its runner exists", func(m *Monitor) {
 			m.Type = MonitorTypePing
 			m.Config = mustJSON(*validPingConfig())
-		}, ""},
-		{"ping dispatches to ping validator", func(m *Monitor) {
+		}, "type"},
+		{"ping refused before its config is checked", func(m *Monitor) {
 			m.Type = MonitorTypePing
 			m.Config = mustJSON(ICMPPingMonitorConfig{Host: "", PacketCount: 1})
-		}, "host"},
+		}, "type"},
 		{"dns valid baseline", func(m *Monitor) {
 			m.Type = MonitorTypeDNS
 			m.Config = mustJSON(*validDNSConfig())

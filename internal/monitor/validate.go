@@ -47,7 +47,13 @@ func ValidateMonitor(m *Monitor) error {
 		// source rather than trusting every downstream consumer to sanitize.
 		return &FieldError{"name", "must not contain control characters"}
 	}
-	if !isSupportedMonitorType(m.Type) {
+	switch {
+	case m.Type == MonitorTypePing:
+		// Ping stays in the domain model for the planned ICMP runner, but a
+		// monitor that no runner can execute would fail every check, so it
+		// is refused until the runner exists.
+		return &FieldError{"type", `monitor type "ping" is not available yet: ICMP ping checks are not implemented`}
+	case !isSupportedMonitorType(m.Type):
 		return &FieldError{"type", fmt.Sprintf("unsupported monitor type %q", m.Type)}
 	}
 	switch {
@@ -59,11 +65,12 @@ func ValidateMonitor(m *Monitor) error {
 	return validateConfigByType(m)
 }
 
-// isSupportedMonitorType reports whether t is one of the v0.2.0 monitor
-// types (SPEC §11.2).
+// isSupportedMonitorType reports whether monitors of type t can be created:
+// the types with a probe runner registered by probe.NewDispatcher (SPEC
+// §15.2). MonitorTypePing is excluded until the ICMP runner exists.
 func isSupportedMonitorType(t MonitorType) bool {
 	switch t {
-	case MonitorTypeHTTP, MonitorTypeTCP, MonitorTypePing, MonitorTypeDNS:
+	case MonitorTypeHTTP, MonitorTypeTCP, MonitorTypeDNS:
 		return true
 	}
 	return false
@@ -86,12 +93,6 @@ func validateConfigByType(m *Monitor) error {
 			return &FieldError{"config", "must be a valid TCP config: " + err.Error()}
 		}
 		return ValidateTCPConfig(&cfg)
-	case MonitorTypePing:
-		var cfg ICMPPingMonitorConfig
-		if err := json.Unmarshal(m.Config, &cfg); err != nil {
-			return &FieldError{"config", "must be a valid ICMP ping config: " + err.Error()}
-		}
-		return ValidateICMPPingConfig(&cfg)
 	case MonitorTypeDNS:
 		var cfg DNSMonitorConfig
 		if err := json.Unmarshal(m.Config, &cfg); err != nil {
@@ -185,7 +186,8 @@ func ValidateTCPConfig(c *TCPMonitorConfig) error {
 }
 
 // ValidateICMPPingConfig checks an ICMP ping monitor's type-specific
-// configuration against the SPEC §11.2.3 rules. Hostnames are resolved at
+// configuration against the SPEC §11.2.3 rules. ValidateMonitor does not call
+// it yet: ping monitors are refused until the ICMP runner exists. Hostnames are resolved at
 // validation time so IPv6-only setups surface as a config error instead of a
 // flapping monitor; tests swap the resolver to stay hermetic.
 func ValidateICMPPingConfig(c *ICMPPingMonitorConfig) error {

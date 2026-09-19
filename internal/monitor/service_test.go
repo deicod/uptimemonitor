@@ -339,3 +339,50 @@ func TestServiceOnChange(t *testing.T) {
 		}
 	}
 }
+
+// TestServiceRefusesPingMonitors checks ping monitors can be neither created
+// nor updated while the ICMP runner does not exist: either would leave a
+// monitor that fails every check. A ping row written before this rule (here
+// inserted straight into the repository) can still be deleted.
+func TestServiceRefusesPingMonitors(t *testing.T) {
+	svc, store := newService(t)
+	ctx := context.Background()
+	repo := sqlite.NewMonitorRepo(store)
+
+	ping := sampleMonitor(t)
+	ping.Type = monitor.MonitorTypePing
+	ping.Config = json.RawMessage(`{"host":"192.0.2.1"}`)
+	if _, err := svc.Create(ctx, ping); !isFieldError(err, "type") {
+		t.Fatalf("Create(ping) error = %v, want a FieldError on \"type\"", err)
+	}
+	if list, err := repo.List(ctx, sqlite.MonitorFilter{}); err != nil || len(list) != 0 {
+		t.Fatalf("after refused Create: %d monitors (%v), want none", len(list), err)
+	}
+
+	legacy := sampleMonitor(t)
+	legacy.ID = monitor.NewID()
+	legacy.Type = monitor.MonitorTypePing
+	legacy.Config = json.RawMessage(`{"host":"192.0.2.1"}`)
+	legacy.CreatedAt = time.Now().UTC()
+	legacy.UpdatedAt = legacy.CreatedAt
+	if err := repo.Insert(ctx, legacy); err != nil {
+		t.Fatalf("insert legacy ping monitor: %v", err)
+	}
+	edit := *legacy
+	edit.Name = "renamed"
+	if _, err := svc.Update(ctx, &edit); !isFieldError(err, "type") {
+		t.Errorf("Update(ping) error = %v, want a FieldError on \"type\"", err)
+	}
+	if got, err := repo.Get(ctx, legacy.ID); err != nil || got.Name != legacy.Name {
+		t.Errorf("stored legacy monitor = %+v (%v), want it unchanged", got, err)
+	}
+	if err := svc.Delete(ctx, legacy.ID); err != nil {
+		t.Errorf("Delete(legacy ping) = %v, want the operator able to remove it", err)
+	}
+}
+
+// isFieldError reports whether err is a *monitor.FieldError on field.
+func isFieldError(err error, field string) bool {
+	var fe *monitor.FieldError
+	return errors.As(err, &fe) && fe.Field == field
+}

@@ -15,7 +15,8 @@ import (
 type MonitorType string
 
 // MonitorType values (SPEC §11.2). v0.2.0 adds TCP, ICMP ping, and DNS
-// alongside the v0.1.0 HTTP type.
+// alongside the v0.1.0 HTTP type. Ping is defined for the planned ICMP runner
+// but ValidateMonitor refuses it until that runner exists.
 const (
 	MonitorTypeHTTP MonitorType = "http"
 	MonitorTypeTCP  MonitorType = "tcp"

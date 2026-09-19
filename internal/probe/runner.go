@@ -31,10 +31,11 @@ type Dispatcher struct {
 }
 
 // NewDispatcher returns a Dispatcher pre-registered with the HTTP, TCP, and
-// DNS runners (SPEC §15.2). The ICMP ping runner is not implemented yet, so a
-// ping monitor fails dispatch explicitly rather than falling back to another
-// probe. Tests can override or extend the registry via Register before the
-// dispatcher is shared with other goroutines.
+// DNS runners (SPEC §15.2). The ICMP ping runner is not implemented yet:
+// validation refuses new ping monitors, and one stored before that rule fails
+// dispatch explicitly rather than falling back to another probe. Tests can
+// override or extend the registry via Register before the dispatcher is
+// shared with other goroutines.
 func NewDispatcher() *Dispatcher {
 	d := &Dispatcher{runners: make(map[monitor.MonitorType]Runner)}
 	d.Register(NewHTTPRunner())

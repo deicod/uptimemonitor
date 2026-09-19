@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -16,8 +18,8 @@ import (
 
 // startMonitorAPI serves the /v1 monitor and check-result endpoints over a
 // Unix socket, backed by a migrated SQLite store and the real monitor service
-// (and so the real validator).
-func startMonitorAPI(t *testing.T) (*ipc.Client, *sqlite.Store) {
+// (and so the real validator). It returns the socket path for raw requests.
+func startMonitorAPI(t *testing.T) (*ipc.Client, *sqlite.Store, string) {
 	t.Helper()
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "config.db"))
 	if err != nil {
@@ -40,7 +42,31 @@ func startMonitorAPI(t *testing.T) (*ipc.Client, *sqlite.Store) {
 		<-errCh
 	})
 	waitForServer(t, sock)
-	return ipc.NewClient(sock), store
+	return ipc.NewClient(sock), store, sock
+}
+
+// getRawChecks fetches a monitor's recent checks over the socket as raw JSON
+// rows, bypassing the typed client the way a v0.1.0 consumer would.
+func getRawChecks(t *testing.T, sock, monitorID string) []map[string]json.RawMessage {
+	t.Helper()
+	hc := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", sock)
+		},
+	}}
+	resp, err := hc.Get("http://uptimemonitor/v1/monitors/" + monitorID + "/checks")
+	if err != nil {
+		t.Fatalf("GET checks: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var body struct {
+		Checks []map[string]json.RawMessage `json:"checks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode checks: %v", err)
+	}
+	return body.Checks
 }
 
 // sameJSON reports whether a and b encode the same JSON value.
@@ -61,7 +87,7 @@ func sameJSON(t *testing.T, a, b []byte) bool {
 // monitor for one name server are created, read back with their configs
 // intact, edited, and deleted.
 func TestTCPAndDNSMonitorsOverIPC(t *testing.T) {
-	client, _ := startMonitorAPI(t)
+	client, _, _ := startMonitorAPI(t)
 	ctx := context.Background()
 
 	tcpCfg := json.RawMessage(`{"host":"ns1.dysv.de","port":22}`)
@@ -124,7 +150,7 @@ func TestTCPAndDNSMonitorsOverIPC(t *testing.T) {
 // come back as validation_error naming the offending config field, which is
 // what the TUI uses to put the message next to the right input.
 func TestTCPAndDNSValidationErrorsOverIPC(t *testing.T) {
-	client, _ := startMonitorAPI(t)
+	client, _, _ := startMonitorAPI(t)
 	for _, tc := range []struct {
 		name, typ, cfg, field string
 	}{
@@ -139,6 +165,8 @@ func TestTCPAndDNSValidationErrorsOverIPC(t *testing.T) {
 		{"dns bad condition", "dns", `{"name":"dysv.de","record_type":"A","expected_value":{"condition":"matches","value":"x"}}`, "expected_value.condition"},
 		{"dns empty expected value", "dns", `{"name":"dysv.de","record_type":"A","expected_value":{"condition":"equals","value":""}}`, "expected_value.value"},
 		{"config wrong shape", "tcp", `{"host":"ns1.dysv.de","port":"22"}`, "config"},
+		// No runner can execute ping yet, so the API refuses it outright.
+		{"ping not available", "ping", `{"host":"192.0.2.1"}`, "type"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := client.CreateMonitor(context.Background(), ipc.CreateMonitorRequest{
@@ -151,37 +179,71 @@ func TestTCPAndDNSValidationErrorsOverIPC(t *testing.T) {
 			}
 		})
 	}
+	if list, err := client.ListMonitors(context.Background(), ipc.MonitorListFilter{}); err != nil || len(list) != 0 {
+		t.Errorf("list after invalid creates = %d monitors (%v), want none persisted", len(list), err)
+	}
 }
 
-// TestRecentChecksReturnDetails checks GET /v1/monitors/{id}/checks passes
-// each row's type-specific details through untouched (SPEC §15.3).
+// TestRecentChecksReturnDetails checks GET /v1/monitors/{id}/checks over
+// the real stack: every row carries its type-specific details untouched
+// (SPEC §15.3), HTTP rows additionally carry the deprecated http_status_code
+// that v0.1.0 consumers read (SPEC §10.4), and SQLite stores only details.
 func TestRecentChecksReturnDetails(t *testing.T) {
-	client, store := startMonitorAPI(t)
+	client, store, sock := startMonitorAPI(t)
 	ctx := context.Background()
-	mon, err := client.CreateMonitor(ctx, ipc.CreateMonitorRequest{
-		Name: "ns1 DNS authoritative", Type: "dns", Enabled: true,
-		Interval: ipc.Duration(time.Minute), Timeout: ipc.Duration(5 * time.Second),
-		Config: json.RawMessage(`{"name":"dysv.de","record_type":"SOA","resolver":"ns1.dysv.de"}`),
-	})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	details := json.RawMessage(`{"name":"dysv.de","record_type":"SOA","resolver":"ns1.dysv.de:53",` +
-		`"server":"192.0.2.53:53","rcode":"NOERROR","answer_count":1,` +
-		`"records":["ns1.dysv.de. hostmaster.dysv.de. 2026091901 7200 3600 1209600 3600"]}`)
-	now := time.Now().UTC()
-	if err := sqlite.NewCheckResultRepo(store).Insert(ctx, &monitor.CheckResult{
-		ID: monitor.NewID(), MonitorID: mon.ID, StartedAt: now, FinishedAt: now,
-		Duration: 12 * time.Millisecond, Success: true, State: monitor.StateUp, Details: details,
-	}); err != nil {
-		t.Fatalf("insert check: %v", err)
-	}
+	for _, tc := range []struct {
+		typ, config, details string
+		wantStatus           string // raw http_status_code; "" = absent
+	}{
+		{"http", `{"url":"https://example.com","method":"GET","expected_status_min":200,"expected_status_max":299}`,
+			`{"status_code":200}`, "200"},
+		{"tcp", `{"host":"ns1.dysv.de","port":22}`, `{"remote_addr":"192.0.2.53:22"}`, ""},
+		{"dns", `{"name":"dysv.de","record_type":"SOA","resolver":"ns1.dysv.de"}`,
+			`{"name":"dysv.de","record_type":"SOA","resolver":"ns1.dysv.de:53","server":"192.0.2.53:53",` +
+				`"rcode":"NOERROR","answer_count":1,"records":["ns1.dysv.de. hostmaster.dysv.de. 2026091901 7200 3600 1209600 3600"]}`, ""},
+	} {
+		t.Run(tc.typ, func(t *testing.T) {
+			mon, err := client.CreateMonitor(ctx, ipc.CreateMonitorRequest{
+				Name: tc.typ + " monitor", Type: tc.typ, Enabled: true,
+				Interval: ipc.Duration(time.Minute), Timeout: ipc.Duration(5 * time.Second), Config: json.RawMessage(tc.config),
+			})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			now := time.Now().UTC()
+			checkID := monitor.NewID()
+			if err := sqlite.NewCheckResultRepo(store).Insert(ctx, &monitor.CheckResult{
+				ID: checkID, MonitorID: mon.ID, StartedAt: now, FinishedAt: now,
+				Duration: 12 * time.Millisecond, Success: true, State: monitor.StateUp, Details: json.RawMessage(tc.details),
+			}); err != nil {
+				t.Fatalf("insert check: %v", err)
+			}
 
-	checks, err := client.RecentChecks(ctx, mon.ID, 10)
-	if err != nil || len(checks) != 1 {
-		t.Fatalf("RecentChecks = %d, %v; want 1", len(checks), err)
-	}
-	if !sameJSON(t, checks[0].Details, details) {
-		t.Errorf("details = %s, want %s", checks[0].Details, details)
+			checks, err := client.RecentChecks(ctx, mon.ID, 10)
+			if err != nil || len(checks) != 1 || !sameJSON(t, checks[0].Details, json.RawMessage(tc.details)) {
+				t.Fatalf("RecentChecks = %+v, %v; want one row with details %s", checks, err, tc.details)
+			}
+
+			rows := getRawChecks(t, sock, mon.ID)
+			if len(rows) != 1 || !sameJSON(t, rows[0]["details"], json.RawMessage(tc.details)) {
+				t.Fatalf("raw rows = %v, want one row with details %s", rows, tc.details)
+			}
+			status, has := rows[0]["http_status_code"]
+			if tc.wantStatus == "" && has {
+				t.Errorf("raw http_status_code = %s, want it absent for %s", status, tc.typ)
+			}
+			if tc.wantStatus != "" && string(status) != tc.wantStatus {
+				t.Errorf("raw http_status_code = %q, want %s", status, tc.wantStatus)
+			}
+
+			// The status is derived on read: the stored row holds only details.
+			var stored string
+			if err := store.DB().QueryRowContext(ctx, "SELECT details FROM check_results WHERE id = ?", checkID).Scan(&stored); err != nil {
+				t.Fatalf("read stored details: %v", err)
+			}
+			if stored != tc.details {
+				t.Errorf("stored details = %s, want %s", stored, tc.details)
+			}
+		})
 	}
 }

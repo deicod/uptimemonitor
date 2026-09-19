@@ -180,10 +180,15 @@ func buildQuery(id uint16, q dnsmessage.Question) ([]byte, error) {
 	return b.Finish()
 }
 
-// queryServers sends the query to each server in turn until one replies,
-// all within ctx. A reply with any response code ends the search. It returns
-// the reply, the "ip:port" last queried, and the last error when no server
-// replied.
+// queryServers sends the query to each server in turn until one replies. A
+// reply with any response code ends the search. Each attempt gets an equal
+// share of the time left before ctx's deadline — remaining time divided by
+// the servers still to try — so a silent nameserver cannot use up the budget
+// of those after it; the last attempt, and so the only attempt for an
+// explicit resolver, gets all that is left. Shares are derived from ctx, so
+// they never extend the monitor deadline and cancelling ctx ends any attempt
+// at once. It returns the reply, the "ip:port" last queried, and the last
+// error when no server replied.
 func queryServers(ctx context.Context, servers []string, id uint16, q dnsmessage.Question, query []byte) (dnsmessage.Message, string, error) {
 	if len(servers) == 0 {
 		return dnsmessage.Message{}, "", errNoNameservers
@@ -192,8 +197,10 @@ func queryServers(ctx context.Context, servers []string, id uint16, q dnsmessage
 		lastAddr string
 		lastErr  error
 	)
-	for _, server := range servers {
-		resp, addr, err := exchange(ctx, server, id, q, query)
+	for i, server := range servers {
+		attemptCtx, cancel := attemptContext(ctx, len(servers)-i)
+		resp, addr, err := exchange(attemptCtx, server, id, q, query)
+		cancel()
 		if err == nil {
 			return resp, addr, nil
 		}
@@ -205,9 +212,21 @@ func queryServers(ctx context.Context, servers []string, id uint16, q dnsmessage
 	return dnsmessage.Message{}, lastAddr, lastErr
 }
 
+// attemptContext bounds one server attempt when remaining servers, this one
+// included, are left to try: it gets an equal share of the time until ctx's
+// deadline. A lone remaining server keeps ctx's own deadline.
+func attemptContext(ctx context.Context, remaining int) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok || remaining <= 1 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, time.Until(deadline)/time.Duration(remaining))
+}
+
 // exchange performs the query against one server over UDP and, when the
-// reply is truncated, repeats it over TCP to the same address. It returns the
-// "ip:port" actually queried (empty if the server could not be dialled).
+// reply is truncated, repeats it over TCP to the same address; both legs
+// share ctx, the server's attempt budget. It returns the "ip:port" actually
+// queried (empty if the server could not be dialled).
 func exchange(ctx context.Context, server string, id uint16, q dnsmessage.Question, query []byte) (dnsmessage.Message, string, error) {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "udp", server)

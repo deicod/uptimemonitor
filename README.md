@@ -110,7 +110,9 @@ bar.
 DNS details:
 
 - **Resolver:** empty means the system resolver (the `nameserver` entries in
-  `/etc/resolv.conf`, tried in order). Otherwise give a host name or IP
+  `/etc/resolv.conf`, tried in order, each getting an equal share of the
+  remaining timeout so one silent nameserver cannot starve the next).
+  Otherwise give a host name or IP
   address, optionally with a port (`ns1.example.com`, `192.0.2.53:5353`,
   `[2001:db8::53]:53`); the default port is 53. Queries use UDP and retry over
   TCP when the answer is truncated, all within the monitor timeout.

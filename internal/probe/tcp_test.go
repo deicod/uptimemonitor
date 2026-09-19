@@ -204,3 +204,29 @@ func TestNewDispatcherRoutesEachType(t *testing.T) {
 		t.Errorf("ping dispatch err = %v, want no runner registered", err)
 	}
 }
+
+// TestValidationAcceptsOnlyRunnableTypes keeps monitor validation and the
+// runner registry in step: a monitor type is creatable exactly when
+// NewDispatcher has a runner for it. Otherwise the API would accept monitors
+// that fail every check (ping, until its runner exists) or refuse ones that
+// could run.
+func TestValidationAcceptsOnlyRunnableTypes(t *testing.T) {
+	d := probe.NewDispatcher()
+	for _, typ := range []monitor.MonitorType{
+		monitor.MonitorTypeHTTP, monitor.MonitorTypeTCP, monitor.MonitorTypePing, monitor.MonitorTypeDNS,
+	} {
+		m := monitor.Monitor{Name: "m", Type: typ, Interval: time.Minute, Timeout: time.Second, Config: json.RawMessage(`{}`)}
+
+		var fe *monitor.FieldError
+		refused := errors.As(monitor.ValidateMonitor(&m), &fe) && fe.Field == "type"
+
+		// The empty config makes a registered runner fail on its config,
+		// never with "no runner registered".
+		_, err := d.Dispatch(context.Background(), m)
+		unrunnable := err != nil && strings.Contains(err.Error(), "no runner registered")
+
+		if refused != unrunnable {
+			t.Errorf("type %s: validation refuses = %v, but dispatcher has no runner = %v", typ, refused, unrunnable)
+		}
+	}
+}
