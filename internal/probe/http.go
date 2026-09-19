@@ -58,6 +58,7 @@ func (r *HTTPRunner) Run(ctx context.Context, m monitor.Monitor) (Result, error)
 			FinishedAt: finished,
 			Duration:   finished.Sub(started),
 			Error:      "invalid request",
+			Details:    marshalDetails(HTTPDetails{}),
 		}, nil
 	}
 
@@ -69,6 +70,7 @@ func (r *HTTPRunner) Run(ctx context.Context, m monitor.Monitor) (Result, error)
 			FinishedAt: finished,
 			Duration:   finished.Sub(started),
 			Error:      sanitizeTransportError(err),
+			Details:    marshalDetails(HTTPDetails{}),
 		}, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -80,10 +82,10 @@ func (r *HTTPRunner) Run(ctx context.Context, m monitor.Monitor) (Result, error)
 	finished := time.Now()
 	status := resp.StatusCode
 	res := Result{
-		StartedAt:      started,
-		FinishedAt:     finished,
-		Duration:       finished.Sub(started),
-		HTTPStatusCode: &status,
+		StartedAt:  started,
+		FinishedAt: finished,
+		Duration:   finished.Sub(started),
+		Details:    marshalDetails(HTTPDetails{StatusCode: &status}),
 	}
 	if status >= cfg.ExpectedStatusMin && status <= cfg.ExpectedStatusMax {
 		res.Success = true

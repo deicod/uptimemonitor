@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -42,6 +43,9 @@ type probeOutcome struct {
 	success bool
 	errStr  string
 	status  *int
+	// details overrides the Details payload; when nil, a non-nil status is
+	// encoded as HTTP details the way the HTTP runner does.
+	details json.RawMessage
 }
 
 func (f *fakeProber) Dispatch(_ context.Context, m monitor.Monitor) (monitor.CheckResult, error) {
@@ -58,15 +62,19 @@ func (f *fakeProber) Dispatch(_ context.Context, m monitor.Monitor) (monitor.Che
 
 func (f *fakeProber) next(out probeOutcome, m monitor.Monitor) monitor.CheckResult {
 	now := time.Now().UTC()
+	details := out.details
+	if details == nil && out.status != nil {
+		details = json.RawMessage(fmt.Sprintf(`{"status_code":%d}`, *out.status))
+	}
 	return monitor.CheckResult{
-		ID:             monitor.NewID(),
-		MonitorID:      m.ID,
-		StartedAt:      now,
-		FinishedAt:     now,
-		Duration:       5 * time.Millisecond,
-		Success:        out.success,
-		Error:          out.errStr,
-		HTTPStatusCode: out.status,
+		ID:         monitor.NewID(),
+		MonitorID:  m.ID,
+		StartedAt:  now,
+		FinishedAt: now,
+		Duration:   5 * time.Millisecond,
+		Success:    out.success,
+		Error:      out.errStr,
+		Details:    details,
 	}
 }
 
@@ -629,8 +637,8 @@ func TestPipeline_WritesTSDBSamplesPerCheck(t *testing.T) {
 
 // TestPipeline_FailedCheckSampleHasNoStatus covers the SPEC §14.3 rule that a
 // failed check without an HTTP status must omit the status field — the
-// pipeline forwards the probe's nil HTTPStatusCode untouched so the TSDB
-// writer can suppress the status series.
+// pipeline finds no status in the probe's Details, so the TSDB writer can
+// suppress the status series.
 func TestPipeline_FailedCheckSampleHasNoStatus(t *testing.T) {
 	f := newFixture(t)
 	m := f.createMonitor(t)
@@ -648,5 +656,51 @@ func TestPipeline_FailedCheckSampleHasNoStatus(t *testing.T) {
 	}
 	if got[0].Success {
 		t.Errorf("sample.Success = true, want false")
+	}
+}
+
+// TestPipeline_NonHTTPCheckKeepsDetailsAndOmitsStatus covers the SPEC §14.2
+// rule that the HTTP status series exists for HTTP monitors only: a TCP
+// check's sample carries no status even if its Details happened to hold a
+// status_code key, while its Details are persisted verbatim for the TUI.
+func TestPipeline_NonHTTPCheckKeepsDetailsAndOmitsStatus(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	cfg, err := json.Marshal(monitor.TCPMonitorConfig{Host: "ns1.example.com", Port: 53})
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	m, err := f.svc.Create(ctx, &monitor.Monitor{
+		Name: "ns1 DNS TCP", Type: monitor.MonitorTypeTCP, Enabled: true,
+		Interval: time.Minute, Timeout: 5 * time.Second, Config: cfg,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	details := json.RawMessage(`{"remote_addr":"192.0.2.53:53","status_code":200}`)
+	f.prober.queue = []probeOutcome{{success: true, details: details}}
+	f.pipeline.Run(ctx, *m, false)
+
+	got := f.samples.Samples()
+	if len(got) != 1 {
+		t.Fatalf("samples written = %d, want 1", len(got))
+	}
+	if got[0].MonitorType != string(monitor.MonitorTypeTCP) {
+		t.Errorf("sample.MonitorType = %q, want tcp", got[0].MonitorType)
+	}
+	if got[0].HTTPStatusCode != nil {
+		t.Errorf("sample.HTTPStatusCode = %d, want nil for a TCP monitor", *got[0].HTTPStatusCode)
+	}
+
+	checks, err := sqlite.NewCheckResultRepo(f.store).ListRecent(ctx, m.ID, 1)
+	if err != nil || len(checks) != 1 {
+		t.Fatalf("ListRecent = %v, %v; want one check", checks, err)
+	}
+	if string(checks[0].Details) != string(details) {
+		t.Errorf("persisted details = %s, want %s", checks[0].Details, details)
+	}
+	if checks[0].State != monitor.StateUp {
+		t.Errorf("persisted state = %q, want up", checks[0].State)
 	}
 }

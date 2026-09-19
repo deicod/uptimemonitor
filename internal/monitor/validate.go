@@ -47,7 +47,13 @@ func ValidateMonitor(m *Monitor) error {
 		// source rather than trusting every downstream consumer to sanitize.
 		return &FieldError{"name", "must not contain control characters"}
 	}
-	if !isSupportedMonitorType(m.Type) {
+	switch {
+	case m.Type == MonitorTypePing:
+		// Ping stays in the domain model for the planned ICMP runner, but a
+		// monitor that no runner can execute would fail every check, so it
+		// is refused until the runner exists.
+		return &FieldError{"type", `monitor type "ping" is not available yet: ICMP ping checks are not implemented`}
+	case !isSupportedMonitorType(m.Type):
 		return &FieldError{"type", fmt.Sprintf("unsupported monitor type %q", m.Type)}
 	}
 	switch {
@@ -59,11 +65,12 @@ func ValidateMonitor(m *Monitor) error {
 	return validateConfigByType(m)
 }
 
-// isSupportedMonitorType reports whether t is one of the v0.2.0 monitor
-// types (SPEC §11.2).
+// isSupportedMonitorType reports whether monitors of type t can be created:
+// the types with a probe runner registered by probe.NewDispatcher (SPEC
+// §15.2). MonitorTypePing is excluded until the ICMP runner exists.
 func isSupportedMonitorType(t MonitorType) bool {
 	switch t {
-	case MonitorTypeHTTP, MonitorTypeTCP, MonitorTypePing, MonitorTypeDNS:
+	case MonitorTypeHTTP, MonitorTypeTCP, MonitorTypeDNS:
 		return true
 	}
 	return false
@@ -86,12 +93,6 @@ func validateConfigByType(m *Monitor) error {
 			return &FieldError{"config", "must be a valid TCP config: " + err.Error()}
 		}
 		return ValidateTCPConfig(&cfg)
-	case MonitorTypePing:
-		var cfg ICMPPingMonitorConfig
-		if err := json.Unmarshal(m.Config, &cfg); err != nil {
-			return &FieldError{"config", "must be a valid ICMP ping config: " + err.Error()}
-		}
-		return ValidateICMPPingConfig(&cfg)
 	case MonitorTypeDNS:
 		var cfg DNSMonitorConfig
 		if err := json.Unmarshal(m.Config, &cfg); err != nil {
@@ -185,7 +186,8 @@ func ValidateTCPConfig(c *TCPMonitorConfig) error {
 }
 
 // ValidateICMPPingConfig checks an ICMP ping monitor's type-specific
-// configuration against the SPEC §11.2.3 rules. Hostnames are resolved at
+// configuration against the SPEC §11.2.3 rules. ValidateMonitor does not call
+// it yet: ping monitors are refused until the ICMP runner exists. Hostnames are resolved at
 // validation time so IPv6-only setups surface as a config error instead of a
 // flapping monitor; tests swap the resolver to stay hermetic.
 func ValidateICMPPingConfig(c *ICMPPingMonitorConfig) error {
@@ -222,19 +224,21 @@ func ValidateICMPPingConfig(c *ICMPPingMonitorConfig) error {
 }
 
 // ValidateDNSConfig checks a DNS monitor's type-specific configuration
-// against the SPEC §11.2.4 rules.
+// against the SPEC §11.2.4 rules. The query name reports its errors as
+// "config.name" because a bare "name" would be indistinguishable from the
+// monitor's own name field.
 func ValidateDNSConfig(c *DNSMonitorConfig) error {
 	if c.Name == "" {
-		return &FieldError{"name", "must not be empty"}
+		return &FieldError{"config.name", "must not be empty"}
 	}
-	if !isDNSName(c.Name) {
-		return &FieldError{"name", "must be a valid DNS name"}
+	if !isDNSQueryName(c.Name) {
+		return &FieldError{"config.name", "must be a valid DNS name"}
 	}
 	if !isSupportedDNSRecordType(c.RecordType) {
 		return &FieldError{"record_type", fmt.Sprintf("unsupported record type %q", c.RecordType)}
 	}
 	if c.Resolver != "" {
-		if err := validateResolver(c.Resolver); err != nil {
+		if _, err := ResolverAddress(c.Resolver); err != nil {
 			return err
 		}
 	}
@@ -249,31 +253,52 @@ func ValidateDNSConfig(c *DNSMonitorConfig) error {
 	return nil
 }
 
-// validateResolver checks that resolver parses as host:port with a port in
-// [1, 65535] (SPEC §11.2.4).
-func validateResolver(resolver string) error {
-	host, portStr, err := net.SplitHostPort(resolver)
-	if err != nil {
-		return &FieldError{"resolver", "must be host:port"}
+// defaultDNSPort is used when a DNS monitor's resolver names no port.
+const defaultDNSPort = "53"
+
+// ResolverAddress normalises a DNS monitor's resolver setting to the
+// "host:port" address the runner queries (SPEC §11.2.4). Accepted forms are a
+// DNS name, an IPv4 address, or an IPv6 address — bare or in brackets — each
+// optionally followed by ":port" (IPv6 only in the bracketed form). A missing
+// port defaults to 53. Errors are *FieldError values naming "resolver".
+func ResolverAddress(resolver string) (string, error) {
+	// A bare IP is checked first: an unbracketed IPv6 address contains colons
+	// that SplitHostPort would misread as a port separator.
+	if net.ParseIP(resolver) != nil {
+		return net.JoinHostPort(resolver, defaultDNSPort), nil
+	}
+	host, port := resolver, defaultDNSPort
+	if strings.HasPrefix(resolver, "[") && strings.HasSuffix(resolver, "]") {
+		host = resolver[1 : len(resolver)-1]
+		if ip := net.ParseIP(host); ip == nil || ip.To4() != nil {
+			return "", &FieldError{"resolver", "brackets must enclose an IPv6 address"}
+		}
+	} else if h, p, err := net.SplitHostPort(resolver); err == nil {
+		host, port = h, p
+	} else if strings.Contains(resolver, ":") {
+		return "", &FieldError{"resolver", "must be a host or IP address, optionally followed by :port"}
 	}
 	if host == "" {
-		return &FieldError{"resolver", "host part must not be empty"}
+		return "", &FieldError{"resolver", "host part must not be empty"}
 	}
-	port, err := strconv.Atoi(portStr)
+	if net.ParseIP(host) == nil && !isDNSName(host) {
+		return "", &FieldError{"resolver", "host must be a DNS name or textual IP address"}
+	}
+	n, err := strconv.Atoi(port)
 	if err != nil {
-		return &FieldError{"resolver", "port must be a number"}
+		return "", &FieldError{"resolver", "port must be a number"}
 	}
-	if port < 1 || port > 65535 {
-		return &FieldError{"resolver", "port must be between 1 and 65535"}
+	if n < 1 || n > 65535 {
+		return "", &FieldError{"resolver", "port must be between 1 and 65535"}
 	}
-	return nil
+	return net.JoinHostPort(host, port), nil
 }
 
 // isSupportedDNSRecordType reports whether rt is one of the SPEC §11.2.4
 // record-type constants.
 func isSupportedDNSRecordType(rt DNSRecordType) bool {
 	switch rt {
-	case DNSRecordA, DNSRecordAAAA, DNSRecordCNAME, DNSRecordMX, DNSRecordTXT, DNSRecordNS:
+	case DNSRecordA, DNSRecordAAAA, DNSRecordCNAME, DNSRecordMX, DNSRecordTXT, DNSRecordNS, DNSRecordSOA:
 		return true
 	}
 	return false
@@ -292,11 +317,23 @@ func isSupportedDNSMatchCondition(c DNSMatchCondition) bool {
 	return false
 }
 
-// isDNSName reports whether s is a syntactically valid DNS name per
+// isDNSName reports whether s is a syntactically valid DNS host name per
 // RFC 1035 / RFC 1123: labels are 1-63 alphanumeric+hyphen bytes (not
 // starting or ending with a hyphen) separated by dots, and the whole name
 // (excluding any trailing dot) is 1-253 bytes.
 func isDNSName(s string) bool {
+	return validDNSName(s, false)
+}
+
+// isDNSQueryName is isDNSName extended to allow underscores, which appear in
+// names that are queried but never used as hosts (RFC 2181 §11), such as
+// "_dmarc.example.com" TXT records.
+func isDNSQueryName(s string) bool {
+	return validDNSName(s, true)
+}
+
+// validDNSName implements isDNSName and isDNSQueryName.
+func validDNSName(s string, allowUnderscore bool) bool {
 	if s == "" {
 		return false
 	}
@@ -314,6 +351,7 @@ func isDNSName(s string) bool {
 			case c >= 'a' && c <= 'z':
 			case c >= 'A' && c <= 'Z':
 			case c >= '0' && c <= '9':
+			case c == '_' && allowUnderscore:
 			case c == '-':
 				if i == 0 || i == len(label)-1 {
 					return false

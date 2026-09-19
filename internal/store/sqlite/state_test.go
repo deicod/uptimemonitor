@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -39,7 +40,6 @@ func insertMonitor(t *testing.T, store *Store) string {
 }
 
 func strPtr(s string) *string { return &s }
-func intPtr(i int) *int       { return &i }
 
 // TestMonitorStateRepoUpsertGet verifies that Upsert both inserts a new state
 // row and overwrites an existing one — the scheduler upserts after every
@@ -137,7 +137,7 @@ func sampleCheckResult(monitorID string, startedAt time.Time, success bool) *mon
 	}
 	if success {
 		cr.State = monitor.StateUp
-		cr.HTTPStatusCode = intPtr(200)
+		cr.Details = json.RawMessage(`{"status_code":200}`)
 	} else {
 		cr.State = monitor.StateDown
 		cr.Error = "connection refused"
@@ -146,8 +146,8 @@ func sampleCheckResult(monitorID string, startedAt time.Time, success bool) *mon
 }
 
 // TestCheckResultRepoRoundTrip verifies every persisted field — including the
-// nullable error and status code — survives an insert/list round-trip, since
-// the TUI renders these directly.
+// nullable error and details payload — survives an insert/list round-trip,
+// since the TUI renders these directly.
 func TestCheckResultRepoRoundTrip(t *testing.T) {
 	store := openMigrated(t)
 	ctx := context.Background()
@@ -179,14 +179,14 @@ func TestCheckResultRepoRoundTrip(t *testing.T) {
 	if gotFail.Success || gotFail.State != monitor.StateDown || gotFail.Error != "connection refused" {
 		t.Errorf("failed result mismatch: got %+v", gotFail)
 	}
-	if gotFail.HTTPStatusCode != nil {
-		t.Errorf("failed result HTTPStatusCode = %v, want nil", gotFail.HTTPStatusCode)
+	if gotFail.Details != nil {
+		t.Errorf("failed result Details = %s, want nil (stored as NULL)", gotFail.Details)
 	}
 	if !gotOK.Success || gotOK.Duration != 150*time.Millisecond {
 		t.Errorf("ok result mismatch: got %+v", gotOK)
 	}
-	if gotOK.HTTPStatusCode == nil || *gotOK.HTTPStatusCode != 200 {
-		t.Errorf("ok result HTTPStatusCode = %v, want 200", gotOK.HTTPStatusCode)
+	if string(gotOK.Details) != `{"status_code":200}` {
+		t.Errorf("ok result Details = %s, want {\"status_code\":200}", gotOK.Details)
 	}
 	if gotOK.Error != "" {
 		t.Errorf("ok result Error = %q, want empty", gotOK.Error)

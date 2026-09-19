@@ -5,7 +5,10 @@
 // layers (SPEC §15.1, §17).
 package probe
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Result is the outcome of a single probe execution (SPEC §15). A zero Result
 // represents a failed check with no extra information; runners populate the
@@ -29,8 +32,8 @@ type Result struct {
 	// Success is false. It must not contain secrets or raw request data
 	// (SPEC §15.4, §23).
 	Error string `json:"error,omitempty"`
-	// HTTPStatusCode is the HTTP response status, when one was received.
-	// It is a pointer so the absence of a status (e.g. on a transport
-	// error) can be distinguished from a real 0 status.
-	HTTPStatusCode *int `json:"http_status_code,omitempty"`
+	// Details is the runner's type-specific observation (SPEC §15.3): a
+	// marshalled HTTPDetails, TCPDetails, or DNSDetails, selected by the
+	// monitor's type. It is stored and served verbatim.
+	Details json.RawMessage `json:"details,omitempty"`
 }

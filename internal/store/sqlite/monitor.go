@@ -261,14 +261,6 @@ func nullText(s string) any {
 	return s
 }
 
-// nullInt maps an optional int to a nullable INTEGER column value.
-func nullInt(i *int) any {
-	if i == nil {
-		return nil
-	}
-	return *i
-}
-
 // stringPtr converts a nullable TEXT column value to an optional string.
 func stringPtr(ns sql.NullString) *string {
 	if !ns.Valid {

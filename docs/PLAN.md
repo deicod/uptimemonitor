@@ -1,11 +1,11 @@
 # Uptime Monitor Implementation Plan
 
 Status: Draft
-Version: 0.2
-Date: 2026-05-26
+Version: 0.3
+Date: 2026-09-19
 Repository: `github.com/deicod/uptimemonitor`
 License: MIT
-Derived from: `docs/PRD.md` v0.3 and `docs/SPEC.md` v0.4
+Derived from: `docs/PRD.md` v0.4 and `docs/SPEC.md` v0.5
 
 ## 1. Purpose
 
@@ -131,10 +131,12 @@ specific notes:
     not configure that sysctl, so CI skips the ICMP integration path; the
     unit-level Runner-level-error path is always exercised.
 16. **Migration 0002 hand-edit** — `atlas migrate diff` cannot infer the data
-    backfill between the `ADD details` and `DROP http_status_code` statements,
-    so migration 0002 is hand-edited after generation to insert the
+    backfill between the `ADD details` and `DROP http_status_code` statements
+    (for SQLite it generates a table rebuild instead), so migration 0002 is
+    hand-written as the three SPEC §13.4 statements, including the
     `UPDATE check_results SET details = json_object('status_code', http_status_code) WHERE http_status_code IS NOT NULL;`
-    step. `atlas.sum` is regenerated against the hand-edited file.
+    step. `atlas.sum` is regenerated with `atlas migrate hash`, and a no-op
+    `atlas migrate diff` confirms the directory matches `schema.sql`.
 
 ## 7. Milestones
 
@@ -779,12 +781,17 @@ done.
   *Tests first:* table-driven per type, one row per rule plus a valid
   baseline; an invalid `regex` pattern fails at validation time, not at run
   time; each `DNSMatchCondition` constant is accepted.
+  *As built:* `ValidateMonitor` refuses `ping` with a `type` error until the
+  ICMP runner exists; `ValidateICMPPingConfig` is kept but not wired. M11.9
+  must re-enable `ping` in `isSupportedMonitorType`/`validateConfigByType`
+  when it registers the runner — `TestValidationAcceptsOnlyRunnableTypes`
+  enforces that pairing.
   *Context:* SPEC §11.2; `internal/monitor/validate.go`.
 
-- [ ] **M11.3 — Migration 0002: check_result details** — *deps: M10.6*
+- [x] **M11.3 — Migration 0002: check_result details** — *deps: M10.6*
   Update `internal/store/sqlite/schema.sql`: drop `http_status_code` from
   `check_results`, add `details TEXT`. Generate
-  `internal/store/sqlite/migrations/0002_check_result_details.sql` via
+  `internal/store/sqlite/migrations/20260919080630_check_result_details.sql` via
   `atlas migrate diff`, then hand-edit it to insert the backfill
   `UPDATE check_results SET details = json_object('status_code', http_status_code) WHERE http_status_code IS NOT NULL;`
   between the `ADD COLUMN` and `DROP COLUMN` statements (atlas cannot infer
@@ -796,7 +803,7 @@ done.
   a status code keep `details = NULL`.
   *Context:* SPEC §12.3, §13.4; `internal/store/sqlite/`.
 
-- [ ] **M11.4 — `probe.Result.Details` + `CheckResult` refactor** — *deps: M11.1, M11.3*
+- [x] **M11.4 — `probe.Result.Details` + `CheckResult` refactor** — *deps: M11.1, M11.3*
   In `internal/probe/result.go` replace `HTTPStatusCode *int` with
   `Details json.RawMessage`. Mirror the change in
   `internal/monitor/model.go` `CheckResult`. Add `internal/probe/details.go`
@@ -805,11 +812,13 @@ done.
   `Details` from `probe.Result` into `monitor.CheckResult` verbatim. Update
   the existing HTTP runner to emit `HTTPDetails{StatusCode: …}`. Update the
   SQLite `check_results` repository to read/write the `details` column.
-  Update the TSDB sample writer (`internal/store/tsdb/series.go`) to read
-  the HTTP status from `HTTPDetails` and continue to emit
-  `uptimemonitor_probe_http_status_code` for HTTP monitors only (omit for
-  other types). Update IPC responses and TUI consumers that previously read
-  `HTTPStatusCode` to read it from `Details`.
+  Continue to emit `uptimemonitor_probe_http_status_code` for HTTP monitors
+  only (omit for other types). Update IPC responses and TUI consumers that
+  previously read `HTTPStatusCode` to read it from `Details`.
+  *As built:* the TSDB `CheckSample` keeps its numeric `HTTPStatusCode`
+  field; the check pipeline fills it from `HTTPDetails` for HTTP monitors
+  only, so the TSDB package stays independent of the probe payloads.
+  `ICMPPingDetails` is added together with the ICMP runner (M11.8).
   *Tests first:* HTTP runner emits the expected `HTTPDetails` JSON;
   Dispatcher preserves `Details`; the SQLite repository round-trips
   `Details` (and writes `NULL` when absent); the TSDB writer omits the HTTP
@@ -836,7 +845,7 @@ done.
   behaviour.
   *Context:* SPEC §15.2.1; `internal/probe/http.go`.
 
-- [ ] **M11.6 — TCP port runner** — *deps: M11.2, M11.4*
+- [x] **M11.6 — TCP port runner** — *deps: M11.2, M11.4*
   Add `internal/probe/tcp.go` implementing the `Runner` interface for
   `MonitorTypeTCP` per SPEC §15.2.2: resolve `Host` with the default
   resolver, dial `Host:Port` within the per-monitor timeout, close
@@ -847,21 +856,28 @@ done.
   *Tests first:* against `net.Listen("tcp", "127.0.0.1:0")` — success and
   remote-addr capture; closed port → failure; bogus host → sanitised
   error; deliberately-blocked port → timeout → failure.
+  *As built:* the timeout path uses an already-expired deadline and the
+  cancellation path a cancelled context (a blocked port cannot be produced
+  deterministically); IPv6 and host-name targets and connection cleanup are
+  covered. The unresolvable-host path is left untested so the suite never
+  depends on a resolver.
   *Context:* SPEC §15.2.2; `internal/probe/`.
 
-- [ ] **M11.7 — DNS runner** — *deps: M11.2, M11.4*
+- [x] **M11.7 — DNS runner** — *deps: M11.2, M11.4*
   Add `internal/probe/dns.go` implementing the `Runner` interface for
-  `MonitorTypeDNS` per SPEC §15.2.4: when `Resolver` is set, build a
-  `net.Resolver{PreferGo: true, Dial: …}` that dials UDP to the configured
-  `host:port`; otherwise use the system resolver. Issue exactly one query
+  `MonitorTypeDNS` per SPEC §15.2.4: a `golang.org/x/net/dns/dnsmessage`
+  client (the stdlib `net.Resolver` exposes neither rcodes nor SOA) that
+  queries the configured resolver (host or IP, optional port, default 53)
+  or the `/etc/resolv.conf` nameservers, over UDP with TCP fallback on
+  truncation inside the single monitor deadline. Issue exactly one query
   for `Name` of `RecordType` within the timeout. Populate `DNSDetails`
   with resolver (`"system"` or the configured `host:port`), rcode string,
   answer count, and the first up-to-10 record values in zone-file form.
   Evaluate the 8-condition `ExpectedValue` per SPEC §15.2.4 with
   existential positive / universal negative semantics and case-sensitive
   byte comparisons.
-  *Tests first:* in-process DNS server (e.g. `github.com/miekg/dns`) —
-  happy path for A, AAAA, CNAME, MX, TXT, NS; NXDOMAIN → failure;
+  *Tests first:* in-process UDP/TCP DNS server built with `dnsmessage` —
+  happy path for A, AAAA, CNAME, MX, TXT, NS, SOA; NXDOMAIN → failure;
   SERVFAIL → failure; empty answer set → failure; each of the 8
   conditions with a passing and a failing case; case-sensitive comparison
   (`Example` vs `example`); system-resolver path and custom-resolver path.
@@ -885,6 +901,11 @@ done.
   *Context:* SPEC §15.2.3, §24.2; `internal/probe/`.
 
 - [ ] **M11.9 — Dispatcher registers all four runners** — *deps: M11.5, M11.6, M11.7, M11.8*
+  *Status:* HTTP, TCP, and DNS are registered. Validation refuses `ping`
+  until its runner exists; a ping monitor stored earlier fails dispatch
+  explicitly, with the cause logged by the pipeline. The ICMP runner,
+  re-enabling `ping` in validation (see M11.2), and the misconfigured
+  (no state change) handling of Runner-level errors remain open.
   Update `internal/probe/runner.go` `NewDispatcher()` to register the four
   v0.2.0 runners (HTTP, TCP, ICMP ping, DNS). Update the check pipeline
   (`internal/pipeline/`) so that Runner-level errors are logged and
@@ -898,7 +919,7 @@ done.
   *Context:* SPEC §15.2, §15.4; `internal/probe/runner.go`,
   `internal/pipeline/`.
 
-- [ ] **M11.10 — IPC accepts type-specific configs; returns Details** — *deps: M11.9, M5.2*
+- [x] **M11.10 — IPC accepts type-specific configs; returns Details** — *deps: M11.9, M5.2*
   Update IPC monitor create/update handlers to validate `config` per
   `Type` (delegating to M11.2). Ensure the `config` JSON round-trips per
   type with no shape loss. Update the recent-checks and manual-check
@@ -906,12 +927,21 @@ done.
   accordingly.
   *Tests first:* `POST /v1/monitors` with HTTP-with-keyword, TCP, Ping,
   and DNS configs creates monitors of the right type; invalid per-type
-  configs return `validation_error` with the correct `field`;
+  configs return `validation_error` with the correct `field` (a DNS query
+  name error reports `config.name`);
   `GET /v1/monitors/{id}/checks` returns `details` per row; client decodes
   `Details` as opaque JSON without losing fields.
+  *As built:* `/v1` stays backward-compatible (SPEC §10.4): check rows keep
+  a deprecated `http_status_code`, derived from `details` for HTTP checks
+  only and never stored. `ping` creation returns a `type` validation error
+  until the ICMP runner exists; the other types are covered by tests.
   *Context:* SPEC §10.5, §11.2; `internal/ipc/`.
 
 - [ ] **M11.11 — TUI monitor form: type selector + per-type field groups** — *deps: M11.10*
+  *Status:* the type selector (create only; the type is immutable) and the
+  TCP and DNS field groups are done, including record-type and
+  expected-condition selectors and server-error mapping. The ping field
+  group and the HTTP keyword sub-group remain open.
   Update `internal/tui/screens/` monitor form to expose a `Type` selector
   and render the matching field group per type: HTTP common fields plus
   the optional keyword sub-group (mode + value); TCP host + port; Ping
@@ -925,6 +955,10 @@ done.
   *Context:* PRD §12.3, SPEC §11.2; `internal/tui/screens/`.
 
 - [ ] **M11.12 — TUI monitor detail: per-type Details rendering** — *deps: M11.10*
+  *Status:* HTTP status code, TCP remote address, and DNS rcode + records
+  are rendered on recent-check rows, with a per-type target line on the
+  detail screen and a TARGET column in the monitor list. ICMP and the HTTP
+  keyword-match indicator remain open.
   Extend the monitor detail screen and the recent-checks renderer to show
   per-type summary lines from `CheckResult.Details`: HTTP status code +
   keyword-match indicator; TCP remote address; ICMP best RTT + sent /
@@ -946,6 +980,10 @@ done.
   *Context:* SPEC §21.4; `deployments/`, `README.md`.
 
 - [ ] **M11.14 — E2E smoke test extension** — *deps: M11.10, M11.11*
+  *Status:* `internal/app/e2e_tcp_dns_test.go` covers TCP and DNS (up, a
+  simulated server reboot with incidents and notifications, recovery,
+  history, and persistence across a service restart). The HTTP-keyword and
+  gated ICMP variants remain open.
   Extend the M10.5 end-to-end smoke test to cover TCP, DNS, and HTTP +
   keyword monitors (SPEC §24.4, §28.1): start local listeners (TCP
   loopback, an in-process DNS server, an `httptest` server returning a
@@ -1007,4 +1045,13 @@ done.
       dispatcher wiring, IPC and TUI updates, and a smoke-test extension.
       Updated derived-from references to PRD v0.3 / SPEC v0.4. Added §8.1
       mapping the SPEC §28.1 acceptance criteria to M11 tasks.
+0.3 - Marked M11.3, M11.4, M11.6, M11.7, and M11.10 complete (TCP and DNS
+      monitors, SOA included per PRD v0.4) and recorded the as-built
+      deviations: the DNS runner uses dnsmessage rather than net.Resolver,
+      the pipeline (not the TSDB writer) extracts the HTTP status, and the
+      migration file carries an Atlas timestamp name. Added status notes to
+      the partially done M11.9, M11.11, M11.12, and M11.14. Recorded the
+      pre-merge fixes: the deprecated /v1 http_status_code compatibility
+      field, ping refused at validation until its runner exists, and fair
+      per-nameserver timeout shares for the system resolver.
 ```

@@ -1,8 +1,8 @@
 # Uptime Monitor PRD
 
 Status: Draft  
-Version: 0.3  
-Date: 2026-05-26  
+Version: 0.4  
+Date: 2026-09-19  
 Repository: `github.com/deicod/uptimemonitor`  
 License: MIT  
 Primary target: Linux with systemd  
@@ -337,17 +337,19 @@ Deferred to a later release:
 A DNS monitor must support, in addition to the common fields:
 
 - Query name (FQDN).
-- Record type (one of: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`).
-- Optional resolver (defaults to the system resolver).
+- Record type (one of: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`).
+- Optional resolver: a host name or IP address with an optional port (default
+  53), so an operator can check each authoritative server of a zone directly.
+  Defaults to the system resolver.
 - Optional expected-value check, expressed as a condition plus a value. Conditions are `equals`, `not_equals`, `contains`, `not_contains`, `starts_with`, `not_starts_with`, `ends_with`, `not_ends_with`. Positive conditions (`equals`, `contains`, `starts_with`, `ends_with`) are satisfied when at least one returned record value meets them. Negative conditions (`not_equals`, `not_contains`, `not_starts_with`, `not_ends_with`) are satisfied when no returned record value meets the corresponding positive form. All comparisons are case-sensitive.
 
-Success is defined as receiving a non-empty answer of the requested record type within the timeout, with no error rcode, and (when an expected-value check is configured) satisfying that check.
+Success is defined as receiving a non-empty answer of the requested record type within the timeout, with no error rcode, and (when an expected-value check is configured) satisfying that check. NXDOMAIN, SERVFAIL, REFUSED, timeouts, and malformed replies are failures; a server merely accepting a connection is not success.
 
 Deferred to a later release:
 
 - DNS-over-TLS and DNS-over-HTTPS resolvers.
 - DNSSEC validation.
-- SOA, AXFR, and ANY queries.
+- AXFR and ANY queries.
 
 ### 11.5 Check execution
 
@@ -840,6 +842,11 @@ Decisions accepted for PRD v0.3:
 - DNS expected-value checks support eight conditions — `equals`/`not_equals`, `contains`/`not_contains`, `starts_with`/`not_starts_with`, `ends_with`/`not_ends_with` — with case-sensitive comparison. Positive conditions are existential ("at least one record matches"); negative conditions are universal ("no record matches the positive form").
 - ICMP ping uses unprivileged ICMP datagram sockets; operators are expected to configure `net.ipv4.ping_group_range` (or equivalent group/cap setup), documented in the SPEC and the systemd unit guidance.
 - Probe results carry type-specific data through a typed `details` payload defined in the SPEC, replacing the HTTP-specific column shipped in v0.1.0.
+
+Decisions accepted for PRD v0.4:
+
+- SOA is promoted from deferred to a supported DNS record type, so an operator can check that each authoritative server of a zone serves it (one DNS monitor per server). AXFR and ANY remain deferred.
+- A DNS monitor's resolver may be a host name or IP address with an optional port (default 53); a bare IPv6 address is accepted.
 
 ## 23. Research notes
 

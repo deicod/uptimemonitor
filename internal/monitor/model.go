@@ -15,7 +15,8 @@ import (
 type MonitorType string
 
 // MonitorType values (SPEC §11.2). v0.2.0 adds TCP, ICMP ping, and DNS
-// alongside the v0.1.0 HTTP type.
+// alongside the v0.1.0 HTTP type. Ping is defined for the planned ICMP runner
+// but ValidateMonitor refuses it until that runner exists.
 const (
 	MonitorTypeHTTP MonitorType = "http"
 	MonitorTypeTCP  MonitorType = "tcp"
@@ -117,7 +118,9 @@ type ICMPPingMonitorConfig struct {
 }
 
 // DNSMonitorConfig is the type-specific configuration for a DNS monitor
-// (SPEC §11.2.4). An empty Resolver selects the system resolver.
+// (SPEC §11.2.4). An empty Resolver selects the system resolver; otherwise it
+// is a host or IP address with an optional port (default 53), see
+// ResolverAddress.
 type DNSMonitorConfig struct {
 	Name          string            `json:"name"`
 	RecordType    DNSRecordType     `json:"record_type"`
@@ -136,6 +139,7 @@ const (
 	DNSRecordMX    DNSRecordType = "MX"
 	DNSRecordTXT   DNSRecordType = "TXT"
 	DNSRecordNS    DNSRecordType = "NS"
+	DNSRecordSOA   DNSRecordType = "SOA"
 )
 
 // DNSExpectedValue is the optional expected-value check for a DNS monitor
@@ -165,16 +169,18 @@ const (
 )
 
 // CheckResult is the outcome of a single probe execution (SPEC §11.3).
+// Details is the runner's type-specific payload (SPEC §15.3), stored and
+// served verbatim; its schema is selected by the monitor's Type.
 type CheckResult struct {
-	ID             string
-	MonitorID      string
-	StartedAt      time.Time
-	FinishedAt     time.Time
-	Duration       time.Duration
-	Success        bool
-	State          MonitorState
-	Error          string
-	HTTPStatusCode *int
+	ID         string
+	MonitorID  string
+	StartedAt  time.Time
+	FinishedAt time.Time
+	Duration   time.Duration
+	Success    bool
+	State      MonitorState
+	Error      string
+	Details    json.RawMessage
 }
 
 // MonitorStatus is the current health snapshot of a monitor, persisted as one

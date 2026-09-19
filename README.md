@@ -2,8 +2,8 @@
 
 Self-hosted, terminal-native uptime monitoring written in Go.
 
-Uptime Monitor periodically probes HTTP endpoints, tracks their state and
-incidents, and delivers notifications. It ships as a single binary,
+Uptime Monitor periodically probes HTTP endpoints, TCP ports, and DNS
+records, tracks their state and incidents, and delivers notifications. It ships as a single binary,
 `uptimemonitor`, providing a long-lived background **service** that owns
 persistence, scheduling, and notification delivery, plus a Bubble Tea **TUI**
 client that manages monitors over a local Unix socket.
@@ -15,6 +15,9 @@ Linux with systemd.
 ## Features
 
 - HTTP monitors with per-monitor interval, timeout, and expected status range.
+- TCP port monitors: a successful connect within the timeout is "up".
+- DNS monitors: a real query (A, AAAA, CNAME, MX, TXT, NS, SOA) against the
+  system resolver or an explicit server, with an optional expected-value check.
 - Scheduler with a bounded worker pool and manual "check now" triggers.
 - State machine with incidents (down/recovery) and an event audit log.
 - History via an embedded Prometheus TSDB, shown as a heartbeat row in the TUI.
@@ -88,10 +91,45 @@ bar.
 - **Home:** `s` status, `m` monitors, `N` notifications.
 - **Monitor list:** `n` new, `enter` detail, `e` edit, `d` delete, `c` check now.
 - **Monitor detail:** `1`–`5` select the history range, `c` check now, `e` edit.
+- **Monitor form:** `tab`/`↑↓` move, `space`/`←→` change a toggle or choice
+  (such as the monitor type), `ctrl+s` save. The type is chosen when creating
+  a monitor and cannot be changed afterwards.
 - **Notifications:** `n` new target, `t` send test, `d` delete, `a` attempts,
   `g` toggle the global notifications switch.
 - **Confirm dialog:** `y`/`enter` confirm, `n` cancel. Destructive actions
   (deleting a monitor or target) always ask first.
+
+### Monitor types
+
+| Type | Settings | Up when |
+|------|----------|---------|
+| `http` | URL, expected status range | a `GET` answers with a status in the range |
+| `tcp` | host (DNS name, IPv4, or IPv6), port | a TCP connection is established within the timeout; it is closed immediately |
+| `dns` | query name, record type, optional resolver, optional expected value | the reply is `NOERROR` with at least one record of the queried type, and the expected-value check (if any) passes |
+
+DNS details:
+
+- **Resolver:** empty means the system resolver (the `nameserver` entries in
+  `/etc/resolv.conf`, tried in order, each getting an equal share of the
+  remaining timeout so one silent nameserver cannot starve the next).
+  Otherwise give a host name or IP
+  address, optionally with a port (`ns1.example.com`, `192.0.2.53:5353`,
+  `[2001:db8::53]:53`); the default port is 53. Queries use UDP and retry over
+  TCP when the answer is truncated, all within the monitor timeout.
+- **Record values** are matched in their zone-file text form: `192.0.2.1`,
+  `2001:db8::1`, `target.example.com.` (CNAME/NS keep the trailing dot),
+  `10 mail.example.com.` (MX), the TXT character-strings joined without quotes,
+  and `ns1.example.com. hostmaster.example.com. 2026091901 7200 3600 1209600 3600`
+  (SOA: primary, mailbox, serial, refresh, retry, expire, minimum).
+- **Expected value:** `equals`, `contains`, `starts_with`, and `ends_with`
+  pass when at least one record matches; `not_equals`, `not_contains`,
+  `not_starts_with`, and `not_ends_with` pass only when no record matches.
+  Comparisons are case-sensitive.
+
+For example, one `dns` monitor per authoritative server (query `example.com`,
+type `SOA`, resolver `ns1.example.com`, then `ns2`, …) plus a `tcp` monitor on
+each server's port 22 or 53 shows a server reboot as simultaneous incidents
+that resolve when it is back.
 
 ## Configuration
 

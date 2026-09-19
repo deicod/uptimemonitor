@@ -167,6 +167,7 @@ func (s *monitorDetailScreen) View() string {
 	fmt.Fprintf(&b, "name:      %s\n", m.Name)
 	fmt.Fprintf(&b, "id:        %s\n", m.ID)
 	fmt.Fprintf(&b, "type:      %s\n", m.Type)
+	fmt.Fprintf(&b, "target:    %s\n", monitorTarget(*m))
 	fmt.Fprintf(&b, "enabled:   %s\n", yesNo(m.Enabled))
 	fmt.Fprintf(&b, "interval:  %s\n", time.Duration(m.Interval))
 	fmt.Fprintf(&b, "timeout:   %s\n", time.Duration(m.Timeout))
@@ -178,7 +179,7 @@ func (s *monitorDetailScreen) View() string {
 	b.WriteString("notify:    (notification summary shown from M9)\n")
 
 	b.WriteString("\nrecent checks\n")
-	b.WriteString(renderChecks(s.checks))
+	b.WriteString(renderChecks(m.Type, s.checks))
 
 	b.WriteString("\nincidents\n")
 	b.WriteString(renderIncidents(s.incidents))
@@ -244,9 +245,11 @@ func liveState(m *ipc.MonitorResponse, checks []ipc.CheckResultResponse) string 
 }
 
 // renderChecks formats up to detailRecentLimit checks, most recent first as
-// returned by the service. Each row carries the start time, derived state, an
-// http status code when present, the duration, and any sanitised error string.
-func renderChecks(checks []ipc.CheckResultResponse) string {
+// returned by the service. Each row carries the start time, derived state, the
+// per-type observation from Details (HTTP status code, TCP remote address, or
+// DNS response code followed by the returned records), the duration, and any
+// sanitised error string.
+func renderChecks(monitorType string, checks []ipc.CheckResultResponse) string {
 	if len(checks) == 0 {
 		return "  none\n"
 	}
@@ -255,13 +258,13 @@ func renderChecks(checks []ipc.CheckResultResponse) string {
 		if i >= detailRecentLimit {
 			break
 		}
-		status := "—"
-		if c.HTTPStatusCode != nil {
-			status = fmt.Sprintf("%d", *c.HTTPStatusCode)
-		}
+		status, info := checkSummary(monitorType, c)
 		extra := ""
+		if info != "" {
+			extra += "  " + info
+		}
 		if c.Error != "" {
-			extra = "  " + c.Error
+			extra += "  " + displaySafe(c.Error)
 		}
 		fmt.Fprintf(&b, "  %s  %-4s  %-3s  %dms%s\n",
 			c.StartedAt.Format(time.RFC3339), c.State, status, c.DurationMs, extra)

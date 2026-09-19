@@ -2,26 +2,36 @@ package ipc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
 	"github.com/deicod/uptimemonitor/internal/monitor"
+	"github.com/deicod/uptimemonitor/internal/probe"
 	"github.com/deicod/uptimemonitor/internal/store/sqlite"
 )
 
 // CheckResultResponse is the DTO for a single check observation
-// (SPEC §11.3, §10.5).
+// (SPEC §11.3, §10.5). Details is the runner's type-specific payload
+// (SPEC §15.3), passed through verbatim; its schema follows the monitor's
+// type.
 type CheckResultResponse struct {
-	ID             string    `json:"id"`
-	MonitorID      string    `json:"monitor_id"`
-	StartedAt      time.Time `json:"started_at"`
-	FinishedAt     time.Time `json:"finished_at"`
-	DurationMs     int64     `json:"duration_ms"`
-	Success        bool      `json:"success"`
-	State          string    `json:"state"`
-	Error          string    `json:"error,omitempty"`
-	HTTPStatusCode *int      `json:"http_status_code,omitempty"`
+	ID         string          `json:"id"`
+	MonitorID  string          `json:"monitor_id"`
+	StartedAt  time.Time       `json:"started_at"`
+	FinishedAt time.Time       `json:"finished_at"`
+	DurationMs int64           `json:"duration_ms"`
+	Success    bool            `json:"success"`
+	State      string          `json:"state"`
+	Error      string          `json:"error,omitempty"`
+	Details    json.RawMessage `json:"details,omitempty"`
+	// HTTPStatusCode keeps the v0.1.0 /v1 field for existing consumers (SPEC
+	// §10.4). It is derived from Details, never stored, and present only for
+	// HTTP checks that received a response; TCP and DNS checks omit it.
+	//
+	// Deprecated: read status_code from Details.
+	HTTPStatusCode *int `json:"http_status_code,omitempty"`
 }
 
 // CheckResultListResponse is the DTO returned by GET /v1/monitors/{id}/checks.
@@ -87,7 +97,8 @@ func runMonitorHandler(svc MonitorService, checker ManualChecker) http.HandlerFu
 func listMonitorChecksHandler(svc MonitorService, repo CheckResultReader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		if _, err := svc.Get(r.Context(), id); err != nil {
+		m, err := svc.Get(r.Context(), id)
+		if err != nil {
 			writeAPIError(w, mapServiceError(err))
 			return
 		}
@@ -103,7 +114,7 @@ func listMonitorChecksHandler(svc MonitorService, repo CheckResultReader) http.H
 		}
 		resp := CheckResultListResponse{Checks: make([]CheckResultResponse, 0, len(checks))}
 		for _, c := range checks {
-			resp.Checks = append(resp.Checks, checkResultToResponse(c))
+			resp.Checks = append(resp.Checks, checkResultToResponse(m.Type, c))
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
@@ -118,7 +129,9 @@ func mapRepoError(err error) *APIError {
 	return NewAPIError(ErrInternal, "an internal error occurred")
 }
 
-func checkResultToResponse(c *monitor.CheckResult) CheckResultResponse {
+// checkResultToResponse converts a stored check of a monitor of type t into
+// its IPC DTO, deriving the deprecated http_status_code from Details.
+func checkResultToResponse(t monitor.MonitorType, c *monitor.CheckResult) CheckResultResponse {
 	return CheckResultResponse{
 		ID:             c.ID,
 		MonitorID:      c.MonitorID,
@@ -128,6 +141,7 @@ func checkResultToResponse(c *monitor.CheckResult) CheckResultResponse {
 		Success:        c.Success,
 		State:          string(c.State),
 		Error:          c.Error,
-		HTTPStatusCode: c.HTTPStatusCode,
+		Details:        c.Details,
+		HTTPStatusCode: probe.HTTPStatusCode(t, c.Details),
 	}
 }

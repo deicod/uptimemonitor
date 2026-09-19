@@ -16,6 +16,7 @@ import (
 
 	"github.com/deicod/uptimemonitor/internal/monitor"
 	"github.com/deicod/uptimemonitor/internal/notify"
+	"github.com/deicod/uptimemonitor/internal/probe"
 	"github.com/deicod/uptimemonitor/internal/store/tsdb"
 )
 
@@ -156,7 +157,13 @@ func (p *Pipeline) run(ctx context.Context, m monitor.Monitor) error {
 		// A dispatcher-level error means we never produced a Result (unknown
 		// monitor type, malformed config). Record it as a failed check so the
 		// pipeline still runs the state machine and the operator can see the
-		// failure in the TUI rather than a silent gap.
+		// failure in the TUI rather than a silent gap; the cause goes to the
+		// log because the check row only carries a generic message.
+		p.logger.Error("probe dispatch failed",
+			"monitor_id", m.ID,
+			"monitor_type", string(m.Type),
+			"error", derr.Error(),
+		)
 		now := time.Now().UTC()
 		cr = monitor.CheckResult{
 			ID:         monitor.NewID(),
@@ -202,7 +209,7 @@ func (p *Pipeline) run(ctx context.Context, m monitor.Monitor) error {
 		FinishedAt:     now,
 		Success:        cr.Success,
 		Duration:       cr.Duration,
-		HTTPStatusCode: cr.HTTPStatusCode,
+		HTTPStatusCode: probe.HTTPStatusCode(m.Type, cr.Details),
 	}); err != nil {
 		p.logger.Error("write tsdb samples",
 			"monitor_id", m.ID,

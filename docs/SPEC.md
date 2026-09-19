@@ -1,11 +1,11 @@
 # Uptime Monitor Technical Specification
 
 Status: Draft  
-Version: 0.4  
-Date: 2026-05-26  
+Version: 0.5  
+Date: 2026-09-19  
 Repository: `github.com/deicod/uptimemonitor`  
 License: MIT  
-Derived from: `docs/PRD.md` version 0.3  
+Derived from: `docs/PRD.md` version 0.4  
 Primary target: Linux with systemd  
 Primary interface: Bubble Tea terminal UI
 
@@ -641,6 +641,31 @@ GET /v1/monitors/{id}/checks?limit=50
 
 Returns recent persisted check summaries from SQLite or a combined SQLite/TSDB view.
 
+Each check carries `details`, the type-specific payload of §15.3, which is
+the canonical representation. For compatibility with v0.1.0 consumers (§10.4)
+HTTP checks that received a response also carry the deprecated
+`http_status_code`, derived from `details` on every read and never stored;
+TCP, DNS, and HTTP checks without a status omit it. New clients should read
+`details`.
+
+```json
+{
+  "checks": [
+    {
+      "id": "01HX...",
+      "monitor_id": "01HX...",
+      "started_at": "2026-09-19T10:00:00Z",
+      "finished_at": "2026-09-19T10:00:00.120Z",
+      "duration_ms": 120,
+      "success": true,
+      "state": "up",
+      "details": { "status_code": 200 },
+      "http_status_code": 200
+    }
+  ]
+}
+```
+
 #### History
 
 ```text
@@ -808,6 +833,10 @@ Validation:
 
 #### 11.2.3 ICMP ping
 
+Not accepted yet: until the ICMP runner (§15.2.3) exists, `ping` monitors
+are refused at validation (§11.2.5). The config shape and rules below are
+the target for that runner.
+
 ```go
 type ICMPPingMonitorConfig struct {
     Host        string `json:"host"`
@@ -828,8 +857,8 @@ Validation:
 ```go
 type DNSMonitorConfig struct {
     Name          string            `json:"name"`        // FQDN
-    RecordType    DNSRecordType     `json:"record_type"` // A | AAAA | CNAME | MX | TXT | NS
-    Resolver      string            `json:"resolver,omitempty"` // optional host:port
+    RecordType    DNSRecordType     `json:"record_type"` // A | AAAA | CNAME | MX | TXT | NS | SOA
+    Resolver      string            `json:"resolver,omitempty"` // optional host[:port]; empty = system resolver
     ExpectedValue *DNSExpectedValue `json:"expected_value,omitempty"`
 }
 
@@ -842,6 +871,7 @@ const (
     DNSRecordMX    DNSRecordType = "MX"
     DNSRecordTXT   DNSRecordType = "TXT"
     DNSRecordNS    DNSRecordType = "NS"
+    DNSRecordSOA   DNSRecordType = "SOA"
 )
 
 type DNSExpectedValue struct {
@@ -865,9 +895,19 @@ const (
 
 Validation:
 
-- `Name`: non-empty; valid FQDN syntax.
-- `RecordType`: must be one of the listed constants.
-- `Resolver`: when set, must parse as `host:port` with port in `[1, 65535]`.
+- `Name`: non-empty; valid FQDN syntax (a trailing dot is optional). Labels
+  may contain underscores, which appear in names that are queried but never
+  used as hosts (e.g. `_dmarc.example.com` TXT). Validation errors for this
+  field report `field: "config.name"`, because a bare `name` would be
+  indistinguishable from the monitor's own `name`.
+- `RecordType`: must be one of the listed constants. `AXFR` and `ANY` are
+  not supported.
+- `Resolver`: when set, a DNS host name, an IPv4 address, or an IPv6 address
+  (bare or in brackets), optionally followed by `:port` (IPv6 only in the
+  bracketed form, e.g. `[2001:db8::53]:53`); port in `[1, 65535]`, default
+  `53`. `monitor.ResolverAddress` normalises it to the `host:port` the runner
+  queries.
+- `ExpectedValue.Condition`: one of the eight conditions below.
 - `ExpectedValue.Value`: non-empty when `ExpectedValue` is set.
 
 #### 11.2.5 Common validation
@@ -878,7 +918,10 @@ These rules apply to every monitor type:
   notification payloads such as the email Subject and into TUI rendering, so
   control characters are rejected at the source to prevent header injection
   (CWE-93) and rendering corruption).
-- `Type`: must be one of `http`, `tcp`, `ping`, `dns`.
+- `Type`: must be one of the executable types `http`, `tcp`, `dns` — those
+  with a probe runner (§15.2). `ping` is defined for the planned ICMP runner
+  but refused with a `type` validation error until that runner exists, so
+  no monitor can be created that would fail every check.
 - `Interval`: positive.
 - `Timeout`: positive; less than `Interval` by default.
 - `Config`: must decode cleanly into the type-specific struct above and pass
@@ -902,7 +945,9 @@ type CheckResult struct {
 
 The v0.1.0 `HTTPStatusCode *int` field is removed in v0.4. HTTP status code
 now lives inside `Details` as `HTTPDetails.StatusCode`. Migration 0002
-(§13.4) backfills existing rows.
+(§13.4) backfills existing rows. The IPC check-result DTO exposes the payload
+as `details` and, for /v1 compatibility, keeps a deprecated
+`http_status_code` derived from it for HTTP checks (§10.5).
 
 ### 11.4 Monitor states
 
@@ -1168,7 +1213,8 @@ The v0.1.0 schema (§12.3) stored HTTP-specific data in
 JSON payload to support TCP, ICMP, DNS, and HTTP-keyword data without
 widening the row per type.
 
-Migration `0002_check_result_details.sql`:
+Migration 0002 — the file `20260919080630_check_result_details.sql`, since
+migration files carry Atlas's timestamp prefix; "0002" names its position:
 
 ```sql
 ALTER TABLE check_results ADD COLUMN details TEXT;
@@ -1178,8 +1224,11 @@ UPDATE check_results
 ALTER TABLE check_results DROP COLUMN http_status_code;
 ```
 
-`ALTER TABLE … DROP COLUMN` requires SQLite ≥ 3.35.0, which `modernc.org/sqlite`
-satisfies. Existing rows produced by the v0.1.0 HTTP runner are preserved
+The statements are hand-written (`atlas migrate diff` would rebuild the
+table and cannot infer the backfill) and `atlas.sum` is regenerated with
+`atlas migrate hash`; `atlas migrate validate` and a no-op `atlas migrate
+diff` confirm the directory matches `schema.sql`. `ALTER TABLE … DROP COLUMN`
+requires SQLite ≥ 3.35.0, which `modernc.org/sqlite` satisfies. Existing rows produced by the v0.1.0 HTTP runner are preserved
 through the backfill: `http_status_code = N` becomes
 `details = {"status_code": N}`. New runners emit their own typed payloads
 (§15.3).
@@ -1319,7 +1368,7 @@ type Result struct {
 ### 15.2 Runner registry
 
 The probe Dispatcher routes a check to the Runner registered for the
-monitor's `MonitorType`. v0.2.0 ships four runners:
+monitor's `MonitorType`. v0.2.0 plans four runners:
 
 ```text
 http  -> HTTP runner (§15.2.1)
@@ -1328,8 +1377,13 @@ ping  -> ICMP ping runner (§15.2.3)
 dns   -> DNS runner (§15.2.4)
 ```
 
-`NewDispatcher()` registers all four. Tests may override the registry by
-calling `Register` before sharing the dispatcher across goroutines.
+`NewDispatcher()` registers every implemented runner: `http`, `tcp`, and
+`dns`. The ICMP ping runner is not implemented yet; until it is, validation
+refuses `ping` monitors (§11.2.5). A `ping` monitor stored before that rule
+fails dispatch with a "no runner registered" error rather than being probed
+by another runner — the pipeline records a failed check ("probe configuration
+error") and logs the cause. Tests may override the registry by calling
+`Register` before sharing the dispatcher across goroutines.
 
 #### 15.2.1 HTTP runner
 
@@ -1363,12 +1417,18 @@ drained within the monitor timeout to avoid TCP teardown noise.
 
 Behavior:
 
-- Resolves `TCPMonitorConfig.Host` with the default `net.Resolver`.
-- Dials TCP to `Host:Port` within the per-monitor timeout.
+- Resolves `TCPMonitorConfig.Host` with the default `net.Resolver`; a
+  context-aware `net.Dialer` tries each resolved address (IPv4 and IPv6)
+  within the per-monitor timeout.
+- Dials TCP to `net.JoinHostPort(Host, Port)`, honouring cancellation of the
+  check context (service shutdown).
 - Closes the connection on success; no application-layer payload is
   exchanged.
-- Records the resolved address in `TCPDetails`.
-- Classifies success as a successful connect within the timeout.
+- Records the connected `ip:port` in `TCPDetails.RemoteAddr` (absent when no
+  connection was made).
+- Classifies success as a successful connect within the timeout. Failures
+  carry a short cause without addresses, e.g. `connect: connection refused`,
+  `connect: timed out`, `connect: host lookup failed: no such host`.
 
 #### 15.2.3 ICMP ping runner
 
@@ -1400,23 +1460,56 @@ Operational requirement (`ping_group_range`):
 
 Behavior:
 
-- If `DNSMonitorConfig.Resolver` is set (e.g. `1.1.1.1:53`), the runner uses
-  a `net.Resolver{PreferGo: true, Dial: ...}` that dials UDP to the
-  configured address. Otherwise the runner uses the system resolver.
-- Issues exactly one query for `Name` of `RecordType` within the per-monitor
-  timeout.
-- Records resolver, rcode string (`NOERROR`, `NXDOMAIN`, `SERVFAIL`, …),
-  answer count, and the first up-to-10 record values (zone-file textual
-  form) in `DNSDetails`.
-- Classifies success as: no error rcode, a non-empty answer set of the
-  requested record type, and (when configured) the expected-value check
-  passes.
+- Builds and parses DNS messages with `golang.org/x/net/dns/dnsmessage` (the
+  package the standard library's resolver uses internally): `net.Resolver`
+  exposes neither the response code nor SOA lookups, and hides which server
+  answered.
+- Server selection: when `DNSMonitorConfig.Resolver` is set, the query goes
+  to its normalised address (§11.2.4); a host name there is resolved with the
+  system resolver. Otherwise the runner queries the system resolver: the
+  `nameserver` entries of `/etc/resolv.conf`, tried in order until one
+  replies (falling back to `127.0.0.1:53` and `[::1]:53` like the Go
+  resolver). Each attempt gets an equal share of the time left (remaining
+  time ÷ nameservers still to try), so a silent nameserver cannot starve the
+  ones after it; the last attempt — and so a lone explicit resolver — gets
+  all that is left. `search`/`ndots` never apply — the configured name is queried as
+  an absolute name.
+- Issues one query for `Name` of `RecordType`, class IN, with recursion
+  desired and an EDNS(0) record advertising a 1232-byte UDP payload. The
+  query goes over UDP; a truncated (TC) reply is repeated over TCP to the
+  same server address. All legs share the single per-monitor deadline —
+  the TCP retry does not restart the timeout — and cancellation of the check
+  context interrupts any blocked read.
+- UDP datagrams that are not a reply to the query (wrong ID or a different
+  question) are ignored, as the Go resolver does. A reply with the right ID
+  that does not parse fails the check as a malformed response.
+- Records resolver (`"system"` or the normalised `host:port`), the
+  `ip:port` queried, the rcode mnemonic (`NOERROR`, `NXDOMAIN`, `SERVFAIL`,
+  `REFUSED`, …), the answer count, and the first up-to-10 record values in
+  `DNSDetails`.
+- Classifies success as: a reply within the timeout, rcode `NOERROR`, at
+  least one answer record of the requested type (other answer types, such as
+  a CNAME chain in front of an A answer, do not count), and (when configured)
+  a passing expected-value check. Timeouts, network errors, malformed
+  replies, error rcodes, and empty answers are per-check failures with a
+  short cause, e.g. `dns query: timed out`, `response code SERVFAIL`,
+  `no SOA records in answer`, `expected value check failed: equals "…"`.
 
 Expected-value check (`DNSMonitorConfig.ExpectedValue`, optional):
 
-- Each returned record is serialized to its zone-file textual form (e.g.
-  `1.2.3.4` for A; `mail.example.com.` for CNAME/NS; `10 mail.example.com.`
-  for MX; the joined character-string contents for TXT).
+- Each returned record is serialized to its zone-file textual form, which is
+  also what `DNSDetails.Records` and the TUI show:
+  - A: `192.0.2.1`; AAAA: RFC 5952 form, e.g. `2001:db8::1` (an
+    IPv4-mapped address stays `::ffff:192.0.2.1`).
+  - CNAME, NS: the target name with its trailing dot, e.g.
+    `mail.example.com.`; letter case is kept as received.
+  - MX: preference and exchange, e.g. `10 mail.example.com.`.
+  - TXT: the record's character-strings concatenated without quotes or
+    separators, e.g. `v=spf1 -all`.
+  - SOA: `MNAME RNAME SERIAL REFRESH RETRY EXPIRE MINIMUM`, e.g.
+    `ns1.example.com. hostmaster.example.com. 2026091901 7200 3600 1209600 3600`.
+- The check sees every answer of the requested type, not only the ten kept
+  in `DNSDetails`.
 - Supported conditions (case-sensitive, byte comparisons):
   - `equals` / `not_equals`
   - `contains` / `not_contains`
@@ -1443,7 +1536,7 @@ type HTTPDetails struct {
 
 // monitor.MonitorTypeTCP -> TCPDetails
 type TCPDetails struct {
-    RemoteAddr string `json:"remote_addr"` // resolved host:port
+    RemoteAddr string `json:"remote_addr,omitempty"` // connected ip:port; absent when no connection was made
 }
 
 // monitor.MonitorTypePing -> ICMPPingDetails
@@ -1456,15 +1549,23 @@ type ICMPPingDetails struct {
 
 // monitor.MonitorTypeDNS -> DNSDetails
 type DNSDetails struct {
-    Resolver    string   `json:"resolver"`    // "system" or "host:port"
-    RCode       string   `json:"rcode"`       // NOERROR, NXDOMAIN, ...
-    AnswerCount int      `json:"answer_count"`
+    Name        string   `json:"name"`             // query name as configured
+    RecordType  string   `json:"record_type"`      // A, AAAA, ..., SOA
+    Resolver    string   `json:"resolver"`         // "system" or the normalised "host:port"
+    Server      string   `json:"server,omitempty"` // ip:port queried last; absent if none could be dialled
+    RCode       string   `json:"rcode,omitempty"`  // NOERROR, NXDOMAIN, ...; absent when no reply arrived
+    AnswerCount int      `json:"answer_count"`     // answers of RecordType, uncapped
     Records     []string `json:"records,omitempty"` // first up-to-10, zone-file form
 }
 ```
 
 The check_result row stores Details as the `details TEXT` column (§12.3). A
-nil `Details` is allowed; every v0.2.0 runner sets a value. IPC consumers
+nil `Details` is allowed (v0.1.0 rows without a status code, and checks whose
+dispatch failed); every implemented runner sets a value. The structs live in
+`internal/probe/details.go`; the TUI decodes the fields it renders into its
+own mirror types. The HTTP status sample in the TSDB (§14.2) and the
+deprecated `/v1` `http_status_code` (§10.5) are both derived from
+`HTTPDetails` by `probe.HTTPStatusCode`, for HTTP monitors only. IPC consumers
 must understand the schema for their monitor type; the service returns
 Details verbatim and does not normalize across types.
 
@@ -2084,8 +2185,10 @@ Required areas:
 - Monitor create/update/delete over IPC for every type.
 - Manual check over IPC.
 - TCP runner against `net.Listen("tcp", "127.0.0.1:0")` loopback listener.
-- DNS runner against an in-process DNS server (e.g. `github.com/miekg/dns`)
-  exposing canned A / AAAA / MX / TXT / CNAME / NS responses.
+- DNS runner against an in-process UDP/TCP DNS server built with
+  `dnsmessage` on loopback, exposing canned A / AAAA / CNAME / MX / TXT / NS /
+  SOA responses, error rcodes, dropped, malformed, and truncated replies. No
+  test queries a public resolver.
 - ICMP runner integration test is skipped by default and gated on a build
   tag or env var (e.g. `UPTIMEMONITOR_TEST_ICMP=1`) because it requires
   `ping_group_range` to be configured; CI defaults to skip.
@@ -2222,7 +2325,7 @@ Deliver:
 
 Deliver:
 
-- Migration `0002_check_result_details.sql` replacing
+- Migration 0002 (`…_check_result_details.sql`) replacing
   `check_results.http_status_code` with `details TEXT` and backfilling
   existing rows (§13.4).
 - `probe.Result.Details` and per-type Details structs (§15.3).
@@ -2324,7 +2427,7 @@ In addition to the MVP criteria above, v0.2.0 is satisfied when:
   `net.ipv4.ping_group_range` covers the service group, and returns a
   Runner-level error (logged, surfaced in the TUI as misconfigured) on a
   host where the socket cannot be opened.
-- Migration `0002_check_result_details.sql` applies cleanly to a v0.1.0
+- Migration 0002 (`…_check_result_details.sql`) applies cleanly to a v0.1.0
   database and backfills `http_status_code` rows into `details` as
   `{"status_code": N}`.
 - Per-type summary lines (HTTP status code, TCP remote address, ICMP RTT,
@@ -2356,4 +2459,19 @@ In addition to the MVP criteria above, v0.2.0 is satisfied when:
       requirement for unprivileged ICMP. Added §27.1 resolutions, §28.1
       acceptance criteria, and Milestone 8 (§26). Probe directory layout in §5
       expanded to `details.go`, `dns.go`, `http.go`, `ping.go`, `tcp.go`.
+0.5 - Implemented the TCP and DNS monitor types. Promoted SOA to a
+      supported DNS record type (PRD v0.4). DNS resolvers accept a host or IP
+      with an optional port (default 53), and query names may contain
+      underscores; a DNS query-name validation error reports field
+      `config.name` (§11.2.4). Specified the DNS runner as a `dnsmessage`
+      client with system-resolver semantics, EDNS(0), TCP fallback within the
+      single deadline, and the canonical record text forms (§15.2.4).
+      Extended `DNSDetails` with name, record type, and queried server
+      (§15.3). Documented the actual migration 0002 filename (§13.4) and
+      that the dispatcher registers http, tcp, and dns until the ICMP runner
+      exists (§15.2). Kept /v1 compatible (§10.4): check results carry a
+      deprecated http_status_code derived from details for HTTP (§10.5).
+      Validation refuses ping monitors until the ICMP runner exists
+      (§11.2.5). System nameservers split the monitor timeout into equal
+      per-attempt shares (§15.2.4).
 ```

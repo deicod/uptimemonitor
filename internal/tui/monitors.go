@@ -217,13 +217,14 @@ func (s *monitorListScreen) View() string {
 		b.WriteString("no monitors — press n to create one")
 		return b.String()
 	}
-	fmt.Fprintf(&b, "  %-28s %-6s %-10s %-8s %-8s %s\n",
-		"NAME", "TYPE", "INTERVAL", "STATE", "ENABLED", "NOTIFY")
+	fmt.Fprintf(&b, "  %-28s %-6s %-10s %-8s %-8s %-6s %s\n",
+		"NAME", "TYPE", "INTERVAL", "STATE", "ENABLED", "NOTIFY", "TARGET")
 	for i, m := range s.monitors {
-		row := fmt.Sprintf("%-28s %-6s %-10s %-8s %-8s %s",
+		row := fmt.Sprintf("%-28s %-6s %-10s %-8s %-8s %-6s %s",
 			truncate(m.Name, 28), m.Type,
 			time.Duration(m.Interval).String(),
-			s.stateFor(m), yesNo(m.Enabled), yesNo(m.NotificationsEnabled))
+			s.stateFor(m), yesNo(m.Enabled), yesNo(m.NotificationsEnabled),
+			truncate(monitorTarget(m), listTargetWidth))
 		cursor := "  "
 		if i == s.cursor {
 			cursor = "› "
@@ -236,6 +237,10 @@ func (s *monitorListScreen) View() string {
 	b.WriteString("\n↑/↓ move • enter detail • n new • e edit • c check now • d delete • r refresh")
 	return b.String()
 }
+
+// listTargetWidth caps the TARGET column so a long URL or DNS summary does not
+// wrap the row.
+const listTargetWidth = 40
 
 // stateFor returns the live state to render for monitor m. The state map is
 // populated asynchronously after the list load (PLAN M7.8); until it arrives,
