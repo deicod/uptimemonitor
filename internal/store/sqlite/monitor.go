@@ -99,7 +99,7 @@ func (r *MonitorRepo) List(ctx context.Context, f MonitorFilter) ([]*monitor.Mon
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list monitors: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var monitors []*monitor.Monitor
 	for rows.Next() {

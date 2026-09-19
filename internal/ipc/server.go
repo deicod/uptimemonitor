@@ -61,7 +61,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Set socket permissions to 0660 (SPEC §20.3).
 	if err := os.Chmod(s.socketPath, 0660); err != nil {
-		ln.Close()
+		_ = ln.Close()
 		return fmt.Errorf("ipc: chmod socket: %w", err)
 	}
 
@@ -136,7 +136,7 @@ func notFoundHandler(next http.Handler) http.Handler {
 func writeNotFound(w http.ResponseWriter) {
 	apiErr := NewAPIError(ErrNotFound, "the requested resource was not found")
 	w.WriteHeader(http.StatusNotFound)
-	w.Write(EncodeError(apiErr))
+	_, _ = w.Write(EncodeError(apiErr))
 }
 
 // sniffer is an http.ResponseWriter that buffers the first Write call so we
@@ -183,7 +183,7 @@ func (s *sniffer) flush() {
 
 	s.ResponseWriter.WriteHeader(code)
 	if len(s.buf) > 0 {
-		s.ResponseWriter.Write(s.buf)
+		_, _ = s.ResponseWriter.Write(s.buf)
 	}
 }
 

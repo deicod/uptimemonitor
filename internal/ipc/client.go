@@ -77,7 +77,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, result a
 	if err != nil {
 		return c.wrapConnError(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read the full body so we can inspect it.
 	respBody, err := io.ReadAll(resp.Body)

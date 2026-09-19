@@ -74,7 +74,7 @@ func (r *EventRepo) ListByMonitor(ctx context.Context, monitorID string, limit i
 
 // scanEvents drains a rows cursor into Event values, closing it before return.
 func scanEvents(rows *sql.Rows, op string) ([]*monitor.Event, error) {
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var events []*monitor.Event
 	for rows.Next() {

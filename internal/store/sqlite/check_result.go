@@ -55,7 +55,7 @@ func (r *CheckResultRepo) ListRecent(ctx context.Context, monitorID string, limi
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list check_results for %s: %w", monitorID, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []*monitor.CheckResult
 	for rows.Next() {

@@ -23,7 +23,7 @@ func TestCleanerRun_RemovesOldCheckResultsKeepsRecent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite.Open: %v", err)
 	}
-	t.Cleanup(func() { sq.Close() })
+	t.Cleanup(func() { _ = sq.Close() })
 	if err := sq.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestCleanerRun_RemovesOldCheckResultsKeepsRecent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tsdb.Open: %v", err)
 	}
-	t.Cleanup(func() { ts.Close() })
+	t.Cleanup(func() { _ = ts.Close() })
 
 	c := retention.New(checks, ts, retention.Options{
 		CheckResultRetention: 30 * 24 * time.Hour,

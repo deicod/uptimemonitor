@@ -129,7 +129,7 @@ func (r *NotificationTargetRepo) listRaw(ctx context.Context) ([]*notify.Target,
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list notification targets: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*notify.Target
 	for rows.Next() {

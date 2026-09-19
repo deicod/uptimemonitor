@@ -31,7 +31,9 @@ func TestClientDoSuccessDecode(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(want)
+		if err := json.NewEncoder(w).Encode(want); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	})
 
 	srv := startTestServer(t, sock, mux)
@@ -104,7 +106,9 @@ func TestClientDoWithRequestBody(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(echoResponse{Received: req.Name})
+		if err := json.NewEncoder(w).Encode(echoResponse{Received: req.Name}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	})
 
 	srv := startTestServer(t, sock, mux)
@@ -132,7 +136,9 @@ func TestClientDoErrorEnvelope(t *testing.T) {
 		apiErr := NewAPIError(ErrNotFound, "monitor not found")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		w.Write(EncodeError(apiErr))
+		if _, err := w.Write(EncodeError(apiErr)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	})
 
 	srv := startTestServer(t, sock, mux)
@@ -168,7 +174,9 @@ func TestClientDoValidationError(t *testing.T) {
 		apiErr := NewAPIError(ErrValidation, "interval must be at least 1s", "interval")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		w.Write(EncodeError(apiErr))
+		if _, err := w.Write(EncodeError(apiErr)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	})
 
 	srv := startTestServer(t, sock, mux)
@@ -233,7 +241,9 @@ func TestClientConnectionRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
-	ln.Close()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
 
 	client := NewClient(sock)
 
@@ -283,7 +293,9 @@ func TestClientNonJSONErrorBody(t *testing.T) {
 	mux.HandleFunc("GET /v1/broken", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "something went wrong")
+		if _, err := fmt.Fprintf(w, "something went wrong"); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	})
 
 	srv := startTestServer(t, sock, mux)
@@ -340,7 +352,7 @@ func startTestServer(t *testing.T, sock string, handler http.Handler) *testServe
 	for time.Now().Before(deadline) {
 		conn, err := net.Dial("unix", sock)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 			break
 		}
 		time.Sleep(10 * time.Millisecond)

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -73,8 +74,7 @@ func migrateFromDir(db *sql.DB, dir fs.FS) error {
 		}
 
 		if err := execStatements(tx, string(content)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migrate: apply %s: %w", version, err)
+			return rollback(tx, fmt.Errorf("migrate: apply %s: %w", version, err))
 		}
 
 		// Record the revision.
@@ -82,8 +82,7 @@ func migrateFromDir(db *sql.DB, dir fs.FS) error {
 			"INSERT INTO atlas_schema_revisions (version) VALUES (?)",
 			version,
 		); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migrate: record revision %s: %w", version, err)
+			return rollback(tx, fmt.Errorf("migrate: record revision %s: %w", version, err))
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -92,6 +91,16 @@ func migrateFromDir(db *sql.DB, dir fs.FS) error {
 	}
 
 	return nil
+}
+
+// rollback aborts tx after a failed migration step and returns cause. A
+// rollback failure is joined onto cause rather than dropped, so a migration
+// that failed and could not be cleanly undone is reported as such.
+func rollback(tx *sql.Tx, cause error) error {
+	if err := tx.Rollback(); err != nil {
+		return errors.Join(cause, fmt.Errorf("migrate: rollback: %w", err))
+	}
+	return cause
 }
 
 // collectMigrationFiles returns sorted .sql filenames from dir (excluding

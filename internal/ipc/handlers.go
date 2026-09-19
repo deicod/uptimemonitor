@@ -29,9 +29,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write(EncodeError(NewAPIError(ErrInternal, "failed to encode response")))
+		_, _ = w.Write(EncodeError(NewAPIError(ErrInternal, "failed to encode response")))
 		return
 	}
 	w.WriteHeader(status)
-	w.Write(data)
+	_, _ = w.Write(data)
 }

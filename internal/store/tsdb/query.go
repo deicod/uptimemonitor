@@ -127,7 +127,7 @@ func (s *Store) QueryHistory(ctx context.Context, q HistoryQuery) ([]HistoryPoin
 	if err != nil {
 		return nil, fmt.Errorf("tsdb: querier: %w", err)
 	}
-	defer querier.Close()
+	defer func() { _ = querier.Close() }()
 
 	ss := querier.Select(ctx, false, nil,
 		labels.MustNewMatcher(labels.MatchEqual, LabelMonitorID, q.MonitorID),

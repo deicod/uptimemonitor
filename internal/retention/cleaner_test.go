@@ -111,10 +111,7 @@ func TestCleanerStart_RunsImmediatelyAndOnInterval(t *testing.T) {
 
 	// Wait long enough for the initial run plus at least one tick.
 	deadline := time.After(500 * time.Millisecond)
-	for {
-		if atomic.LoadInt32(&pruner.calls) >= 2 && atomic.LoadInt32(&ts.calls) >= 2 {
-			break
-		}
+	for atomic.LoadInt32(&pruner.calls) < 2 || atomic.LoadInt32(&ts.calls) < 2 {
 		select {
 		case <-deadline:
 			t.Fatalf("did not observe two runs: prune=%d tsdb=%d",

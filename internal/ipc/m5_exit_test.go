@@ -23,7 +23,7 @@ func TestMonitorCRUDOverIPC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -219,7 +219,7 @@ func waitForServer(t *testing.T, path string) {
 	for time.Now().Before(deadline) {
 		conn, err := net.Dial("unix", path)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

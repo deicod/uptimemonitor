@@ -193,7 +193,6 @@ func TestM6ExitCheck(t *testing.T) {
 
 	// --- Step 4: View the created monitor (detail) ---
 	// Re-fetch the list with the created monitor.
-	ls := m.top().(*monitorListScreen)
 	m, _ = stepUpdate(m, monitorsLoadedMsg{monitors: fc.monitors})
 
 	// Press enter → openMonitorDetailMsg → pushScreenMsg.
@@ -219,7 +218,6 @@ func TestM6ExitCheck(t *testing.T) {
 	m, _ = stepUpdate(m, popScreenMsg{})
 	assertScreen(t, m, "Monitors")
 
-	ls = m.top().(*monitorListScreen)
 	m, _ = stepUpdate(m, monitorsLoadedMsg{monitors: fc.monitors})
 
 	// Press 'e' to edit.
@@ -262,7 +260,7 @@ func TestM6ExitCheck(t *testing.T) {
 	}
 
 	// --- Step 6: Delete with confirmation ---
-	ls = m.top().(*monitorListScreen)
+	ls := m.top().(*monitorListScreen)
 	m, _ = stepUpdate(m, monitorsLoadedMsg{monitors: fc.monitors})
 
 	// Press 'd' → confirm screen pushed.
@@ -289,10 +287,9 @@ func TestM6ExitCheck(t *testing.T) {
 	}
 
 	// Load the now-empty list.
-	ls = m.top().(*monitorListScreen)
 	m, _ = stepUpdate(m, monitorsLoadedMsg{monitors: fc.monitors})
 
-	view = ls.View()
+	view = m.top().View()
 	if !strings.Contains(view, "no monitors") {
 		t.Errorf("after delete, list should be empty:\n%s", view)
 	}

@@ -103,7 +103,7 @@ func (r *IncidentRepo) ListAll(ctx context.Context, limit int) ([]*monitor.Incid
 // scanIncidents drains a rows cursor into Incident values, closing it before
 // return.
 func scanIncidents(rows *sql.Rows, op string) ([]*monitor.Incident, error) {
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var incidents []*monitor.Incident
 	for rows.Next() {

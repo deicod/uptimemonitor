@@ -96,7 +96,9 @@ func TestStoreHealthJSON(t *testing.T) {
 	h := StoreHealth{OK: true}
 	data, _ := json.Marshal(h)
 	var raw map[string]any
-	json.Unmarshal(data, &raw)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	if _, ok := raw["ok"]; !ok {
 		t.Error("StoreHealth missing JSON key \"ok\"")
@@ -109,7 +111,9 @@ func TestSchedulerStatusJSON(t *testing.T) {
 	s := SchedulerStatus{Running: true, Workers: 8}
 	data, _ := json.Marshal(s)
 	var raw map[string]any
-	json.Unmarshal(data, &raw)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	for _, key := range []string{"running", "workers"} {
 		if _, ok := raw[key]; !ok {
@@ -124,7 +128,9 @@ func TestMonitorCountsJSON(t *testing.T) {
 	m := MonitorCounts{Total: 5, Active: 3}
 	data, _ := json.Marshal(m)
 	var raw map[string]any
-	json.Unmarshal(data, &raw)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
 
 	for _, key := range []string{"total", "active"} {
 		if _, ok := raw[key]; !ok {

@@ -98,7 +98,7 @@ func TestWriteCheck_LabelsAttached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Querier: %v", err)
 	}
-	defer q.Close()
+	defer func() { _ = q.Close() }()
 
 	ss := q.Select(context.Background(), false, nil,
 		labels.MustNewMatcher(labels.MatchEqual, LabelMonitorID, "mon-labels"),
@@ -147,7 +147,7 @@ func readAllSamples(t *testing.T, store *Store, monitorID string) map[string]flo
 	if err != nil {
 		t.Fatalf("Querier: %v", err)
 	}
-	defer q.Close()
+	defer func() { _ = q.Close() }()
 
 	ss := q.Select(context.Background(), false, nil,
 		labels.MustNewMatcher(labels.MatchEqual, LabelMonitorID, monitorID),

@@ -71,7 +71,7 @@ func (r *HTTPRunner) Run(ctx context.Context, m monitor.Monitor) (Result, error)
 			Error:      sanitizeTransportError(err),
 		}, nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// Drain the body so the underlying connection can be reused on the next
 	// check. The body content itself is not inspected (SPEC §15.3 classifies
 	// by status code only for MVP).

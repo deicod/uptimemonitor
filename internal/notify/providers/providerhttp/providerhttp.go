@@ -47,7 +47,7 @@ func PostJSONWithHeaders(ctx context.Context, client *http.Client, method, url s
 	if err != nil {
 		return fmt.Errorf("send request: %w", sanitize(err))
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// Drain so the connection can be reused; the body is not inspected.
 	_, _ = io.Copy(io.Discard, resp.Body)
 

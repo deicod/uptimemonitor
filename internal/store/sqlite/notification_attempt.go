@@ -58,7 +58,7 @@ func (r *NotificationAttemptRepo) ListByTarget(ctx context.Context, targetID str
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list notification attempts for %s: %w", targetID, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*notify.Attempt
 	for rows.Next() {
@@ -90,7 +90,7 @@ func (r *NotificationAttemptRepo) ListRecent(ctx context.Context, limit int) ([]
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list recent notification attempts: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*notify.Attempt
 	for rows.Next() {

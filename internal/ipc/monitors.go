@@ -254,7 +254,7 @@ func mapServiceError(err error) *APIError {
 // HTTP status for its code.
 func writeAPIError(w http.ResponseWriter, e *APIError) {
 	w.WriteHeader(e.Code.HTTPStatus())
-	w.Write(EncodeError(e))
+	_, _ = w.Write(EncodeError(e))
 }
 
 // monitorToResponse converts a domain monitor into its IPC DTO.

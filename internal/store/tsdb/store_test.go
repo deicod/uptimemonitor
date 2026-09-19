@@ -76,7 +76,7 @@ func TestAppendAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Querier: %v", err)
 	}
-	defer q.Close()
+	defer func() { _ = q.Close() }()
 
 	ss := q.Select(context.Background(), false, nil,
 		labels.MustNewMatcher(labels.MatchEqual, "monitor_id", "test-01"),
@@ -149,7 +149,7 @@ func TestCloseAndReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Querier: %v", err)
 	}
-	defer q.Close()
+	defer func() { _ = q.Close() }()
 
 	ss := q.Select(context.Background(), false, nil,
 		labels.MustNewMatcher(labels.MatchEqual, "monitor_id", "persist-01"),

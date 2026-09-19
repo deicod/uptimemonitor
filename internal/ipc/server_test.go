@@ -88,7 +88,7 @@ func TestServerHandlesStaleSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /v1/status: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	cancel()
 	if err := <-errCh; err != nil {
@@ -115,7 +115,7 @@ func TestServerUnknownRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /v1/nonexistent: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
@@ -168,7 +168,9 @@ func TestServerJSONContentType(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"pong":true}`)
+		if _, err := fmt.Fprintf(w, `{"pong":true}`); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	})
 	srv := NewServer(sock, mux)
 
@@ -185,7 +187,7 @@ func TestServerJSONContentType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /v1/ping: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	ct := resp.Header.Get("Content-Type")
 	if ct != "application/json" {
@@ -217,7 +219,7 @@ func TestServerRoutesOutsideV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("GET / status = %d, want %d", resp.StatusCode, http.StatusNotFound)
@@ -261,7 +263,7 @@ func waitForServer(t *testing.T, path string) {
 	for time.Now().Before(deadline) {
 		conn, err := net.Dial("unix", path)
 		if err == nil {
-			conn.Close()
+			_ = conn.Close()
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

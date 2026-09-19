@@ -111,7 +111,7 @@ func newFixture(t *testing.T, opts ...pipeline.Option) *pipelineFixture {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}

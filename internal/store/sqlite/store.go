@@ -39,7 +39,7 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("sqlite: open %s: %w", path, err)
 	}
 	if err := db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("sqlite: ping %s: %w", path, err)
 	}
 	return &Store{db: db}, nil

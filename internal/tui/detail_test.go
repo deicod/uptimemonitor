@@ -193,19 +193,19 @@ var _ Client = (*runRecordingClient)(nil)
 
 func (c *runRecordingClient) RunMonitor(_ context.Context, id string) (ipc.RunMonitorResponse, error) {
 	c.runIDs = append(c.runIDs, id)
-	return c.stubClient.run, nil
+	return c.run, nil
 }
 
 func (c *runRecordingClient) RecentChecks(_ context.Context, id string, limit int) ([]ipc.CheckResultResponse, error) {
 	c.checkIDs = append(c.checkIDs, id)
 	c.checkLims = append(c.checkLims, limit)
-	return c.stubClient.checks, nil
+	return c.checks, nil
 }
 
 func (c *runRecordingClient) History(_ context.Context, id, rangeStr string) (ipc.HistoryResponse, error) {
 	c.historyIDs = append(c.historyIDs, id)
 	c.historyRange = append(c.historyRange, rangeStr)
-	return c.stubClient.history, nil
+	return c.history, nil
 }
 
 // executeSequence drives a tea.Sequence/Batch composite command by recursively

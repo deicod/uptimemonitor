@@ -3,6 +3,7 @@ package sqlite
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestMigrateCreatesAllTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
@@ -53,7 +54,7 @@ func TestMigrateIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("Migrate (first): %v", err)
@@ -96,9 +97,48 @@ func TestMigrateBrokenMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 
 	if err := migrateFromDir(store.DB(), os.DirFS(migrationsDir)); err == nil {
 		t.Fatal("migrateFromDir with broken SQL returned nil error, want error")
+	}
+}
+
+// TestMigrateReportsRollbackFailure verifies that when a migration fails and
+// its transaction cannot be rolled back, the rollback error is reported next
+// to the migration error instead of being dropped — otherwise an operator
+// debugging a failed upgrade would never learn the rollback went wrong too.
+func TestMigrateReportsRollbackFailure(t *testing.T) {
+	dir := t.TempDir()
+
+	// The leading ROLLBACK ends the transaction behind database/sql's back,
+	// so after the next statement fails there is nothing left to roll back
+	// and tx.Rollback itself errors.
+	migrationsDir := filepath.Join(dir, "migrations")
+	if err := os.MkdirAll(migrationsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(migrationsDir, "20260101000000_unrollbackable.sql"),
+		[]byte("ROLLBACK; SELECT * FROM missing_table;"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write migration: %v", err)
+	}
+
+	store, err := Open(filepath.Join(dir, "config.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	err = migrateFromDir(store.DB(), os.DirFS(migrationsDir))
+	if err == nil {
+		t.Fatal("migrateFromDir returned nil error, want error")
+	}
+	for _, want := range []string{"migrate: apply", "migrate: rollback:"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
 	}
 }
