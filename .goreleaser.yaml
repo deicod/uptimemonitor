@@ -1,0 +1,41 @@
+# GoReleaser configuration. .github/workflows/release.yml runs it when a v* tag
+# is pushed and publishes the archives to a GitHub release for that tag.
+# `goreleaser release --snapshot --clean` tries it locally without publishing.
+version: 2
+
+builds:
+  - id: uptimemonitor
+    main: .
+    binary: uptimemonitor
+    # Static, as in .ko.yaml: the SQLite driver and TSDB are pure Go.
+    env:
+      - CGO_ENABLED=0
+    # The service targets Linux with systemd, and the TUI talks to it over a
+    # local Unix socket, so only Linux binaries are released.
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    # Version metadata is injected like `make build` does it (internal/version),
+    # so a release binary reports its tag (e.g. v0.2.1) the same way.
+    ldflags:
+      - -s
+      - -w
+      - -X github.com/deicod/uptimemonitor/internal/version.Version={{.Tag}}
+      - -X github.com/deicod/uptimemonitor/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/deicod/uptimemonitor/internal/version.Date={{.Date}}
+
+archives:
+  - formats: [tar.gz]
+    # Everything the README's installation steps copy, at the same paths.
+    files:
+      - LICENSE
+      - README.md
+      - config.example.yaml
+      - deployments/systemd/uptimemonitor.service
+
+checksum:
+  name_template: checksums.txt
