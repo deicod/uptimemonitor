@@ -28,7 +28,8 @@ import (
 // type and, when configured, a passing expected-value check.
 //
 // Queries go out over UDP; a truncated reply is retried over TCP against the
-// same server. Every leg shares the single monitor deadline.
+// same server with the identical message, so both legs carry the configured
+// RD bit. Every leg shares the single monitor deadline.
 type DNSRunner struct {
 	// systemServers lists the "ip:port" nameservers queried, in order, when a
 	// monitor has no explicit resolver. Tests replace it to reach a local
@@ -101,12 +102,13 @@ func (r *DNSRunner) Run(ctx context.Context, m monitor.Monitor) (Result, error) 
 	}
 	q := dnsmessage.Question{Name: qname, Type: qtype, Class: dnsmessage.ClassINET}
 	id := uint16(rand.Uint32())
-	query, err := buildQuery(id, q)
+	rd := cfg.RecursionDesired == nil || *cfg.RecursionDesired
+	query, err := buildQuery(id, q, rd)
 	if err != nil {
 		return Result{}, fmt.Errorf("dns monitor: build query: %w", err)
 	}
 
-	details := DNSDetails{Name: cfg.Name, RecordType: string(cfg.RecordType), Resolver: "system"}
+	details := DNSDetails{Name: cfg.Name, RecordType: string(cfg.RecordType), Resolver: "system", RecursionDesired: rd}
 	var resolverHost, resolverPort string
 	if cfg.Resolver != "" {
 		addr, err := monitor.ResolverAddress(cfg.Resolver)
@@ -164,10 +166,10 @@ func fqdn(name string) string {
 	return name + "."
 }
 
-// buildQuery packs a recursion-desired query for q with an EDNS(0) record
-// advertising ednsUDPSize.
-func buildQuery(id uint16, q dnsmessage.Question) ([]byte, error) {
-	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, RecursionDesired: true})
+// buildQuery packs a query for q with the RD bit set to rd and an EDNS(0)
+// record advertising ednsUDPSize.
+func buildQuery(id uint16, q dnsmessage.Question, rd bool) ([]byte, error) {
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, RecursionDesired: rd})
 	b.EnableCompression()
 	if err := b.StartQuestions(); err != nil {
 		return nil, err

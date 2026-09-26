@@ -105,7 +105,7 @@ bar.
 |------|----------|---------|
 | `http` | URL, expected status range | a `GET` answers with a status in the range |
 | `tcp` | host (DNS name, IPv4, or IPv6), port | a TCP connection is established within the timeout; it is closed immediately |
-| `dns` | query name, record type, optional resolver, optional expected value | the reply is `NOERROR` with at least one record of the queried type, and the expected-value check (if any) passes |
+| `dns` | query name, record type, optional resolver, recursion desired (default on), optional expected value | the reply is `NOERROR` with at least one record of the queried type, and the expected-value check (if any) passes |
 
 DNS details:
 
@@ -118,6 +118,11 @@ DNS details:
   several addresses has them tried in turn, sharing the timeout the same way.
   Queries use UDP and retry over
   TCP when the answer is truncated, all within the monitor timeout.
+- **Recursion desired:** on by default, so queries set the RD bit. Switch it
+  off (`"recursion_desired": false`) to ask an authoritative server for its
+  own data without requesting recursion. The TCP retry carries the same bit,
+  and each check's details record the bit that was sent. The reply's RA
+  (recursion available) bit is not checked.
 - **Record values** are matched in their zone-file text form: `192.0.2.1`,
   `2001:db8::1`, `target.example.com.` (CNAME/NS keep the trailing dot),
   `10 mail.example.com.` (MX), the TXT character-strings joined without quotes,
@@ -129,9 +134,9 @@ DNS details:
   Comparisons are case-sensitive.
 
 For example, one `dns` monitor per authoritative server (query `example.com`,
-type `SOA`, resolver `ns1.example.com`, then `ns2`, …) plus a `tcp` monitor on
-each server's port 22 or 53 shows a server reboot as simultaneous incidents
-that resolve when it is back.
+type `SOA`, resolver `ns1.example.com`, then `ns2`, …, recursion desired off)
+plus a `tcp` monitor on each server's port 22 or 53 shows a server reboot as
+simultaneous incidents that resolve when it is back.
 
 ## Configuration
 

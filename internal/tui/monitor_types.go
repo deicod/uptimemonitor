@@ -39,12 +39,14 @@ type tcpFormConfig struct {
 	Port int    `json:"port"`
 }
 
-// dnsFormConfig mirrors the SPEC §11.2.4 DNSMonitorConfig JSON shape.
+// dnsFormConfig mirrors the SPEC §11.2.4 DNSMonitorConfig JSON shape. A nil
+// RecursionDesired means true.
 type dnsFormConfig struct {
-	Name          string           `json:"name"`
-	RecordType    string           `json:"record_type"`
-	Resolver      string           `json:"resolver,omitempty"`
-	ExpectedValue *dnsFormExpected `json:"expected_value,omitempty"`
+	Name             string           `json:"name"`
+	RecordType       string           `json:"record_type"`
+	Resolver         string           `json:"resolver,omitempty"`
+	RecursionDesired *bool            `json:"recursion_desired,omitempty"`
+	ExpectedValue    *dnsFormExpected `json:"expected_value,omitempty"`
 }
 
 // dnsFormExpected mirrors the SPEC §11.2.4 DNSExpectedValue JSON shape.

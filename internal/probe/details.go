@@ -31,6 +31,8 @@ type DNSDetails struct {
 	// Server is the "ip:port" that was queried last; absent when no server
 	// could be dialled.
 	Server string `json:"server,omitempty"`
+	// RecursionDesired is the RD bit the query was sent with.
+	RecursionDesired bool `json:"recursion_desired"`
 	// RCode is the response code mnemonic (NOERROR, NXDOMAIN, SERVFAIL, …);
 	// absent when no response arrived.
 	RCode       string   `json:"rcode,omitempty"`

@@ -145,6 +145,7 @@ func defaultFormFields(editing bool) []*formField {
 		forTypes(newTextField("config.name", "query name", ""), "dns"),
 		forTypes(newChoiceField("record_type", "record type", dnsRecordTypes), "dns"),
 		forTypes(newTextField("resolver", "resolver (optional)", ""), "dns"),
+		forTypes(newBoolField("recursion_desired", "recursion desired", true), "dns"),
 		forTypes(newChoiceField("expected_value.condition", "expected condition", dnsConditions), "dns"),
 		forTypes(newTextField("expected_value.value", "expected value", ""), "dns"),
 		newTextField("interval", "interval", "60s"),
@@ -397,6 +398,11 @@ func (s *monitorFormScreen) buildConfig() (json.RawMessage, bool) {
 			RecordType: s.choiceVal("record_type"),
 			Resolver:   strings.TrimSpace(s.text("resolver")),
 		}
+		// RD=1 is the default and is left out, so configs that never set it
+		// are sent back unchanged.
+		if !s.boolVal("recursion_desired") {
+			c.RecursionDesired = boolPtr(false)
+		}
 		if cond := s.choiceVal("expected_value.condition"); cond != dnsConditionNone {
 			// The value is compared byte for byte, so it is sent untrimmed.
 			value := s.text("expected_value.value")
@@ -452,6 +458,7 @@ func (s *monitorFormScreen) applyMonitor(m ipc.MonitorResponse) {
 			s.setText("config.name", cfg.Name)
 			s.setChoice("record_type", cfg.RecordType)
 			s.setText("resolver", cfg.Resolver)
+			s.setBool("recursion_desired", cfg.RecursionDesired == nil || *cfg.RecursionDesired)
 			if cfg.ExpectedValue != nil {
 				s.setChoice("expected_value.condition", cfg.ExpectedValue.Condition)
 				s.setText("expected_value.value", cfg.ExpectedValue.Value)

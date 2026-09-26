@@ -341,6 +341,9 @@ A DNS monitor must support, in addition to the common fields:
 - Optional resolver: a host name or IP address with an optional port (default
   53), so an operator can check each authoritative server of a zone directly.
   Defaults to the system resolver.
+- Recursion desired: on by default. Turning it off sends the query without
+  the RD bit, so a check against an authoritative server asks for that
+  server's own data instead of requesting recursion.
 - Optional expected-value check, expressed as a condition plus a value. Conditions are `equals`, `not_equals`, `contains`, `not_contains`, `starts_with`, `not_starts_with`, `ends_with`, `not_ends_with`. Positive conditions (`equals`, `contains`, `starts_with`, `ends_with`) are satisfied when at least one returned record value meets them. Negative conditions (`not_equals`, `not_contains`, `not_starts_with`, `not_ends_with`) are satisfied when no returned record value meets the corresponding positive form. All comparisons are case-sensitive.
 
 Success is defined as receiving a non-empty answer of the requested record type within the timeout, with no error rcode, and (when an expected-value check is configured) satisfying that check. NXDOMAIN, SERVFAIL, REFUSED, timeouts, and malformed replies are failures; a server merely accepting a connection is not success.

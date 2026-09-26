@@ -87,7 +87,7 @@ func TestMonitorFormTypeSelectorShowsTypeFields(t *testing.T) {
 	want := map[string][]string{
 		"http": {"url", "method", "expected_status_min", "expected_status_max"},
 		"tcp":  {"host", "port"},
-		"dns":  {"config.name", "record_type", "resolver", "expected_value.condition"},
+		"dns":  {"config.name", "record_type", "resolver", "recursion_desired", "expected_value.condition"},
 	}
 	for _, typ := range []string{"http", "tcp", "dns", "tcp"} {
 		selectType(t, s, typ)
@@ -173,6 +173,56 @@ func TestMonitorFormCreatesDNSMonitor(t *testing.T) {
 	want["expected_value"] = map[string]any{"condition": "not_equals", "value": "ns9.dysv.de. "}
 	if got := jsonObject(t, fc.created.Config); !reflect.DeepEqual(got, want) {
 		t.Errorf("config = %v, want %v", got, want)
+	}
+}
+
+// TestMonitorFormDNSRecursionDesired checks the RD toggle round-trips. It
+// starts on and is then left out of the config, so default configs keep
+// their shape; switched off it is sent as false. An edit of an RD=0 monitor
+// must load the toggle off: loading the default instead would make any
+// unrelated edit, such as a rename, silently turn recursion back on.
+func TestMonitorFormDNSRecursionDesired(t *testing.T) {
+	fc := &formClient{}
+	s := newMonitorFormScreen(fc, "")
+	s.Init()
+	selectType(t, s, "dns")
+	s.setText("name", "ns1 DNS authoritative")
+	s.setText("config.name", "dysv.de")
+	s.setChoice("record_type", "SOA")
+	s.setText("resolver", "ns1.dysv.de")
+	if !s.boolVal("recursion_desired") {
+		t.Fatal("recursion desired starts off, want on (the RD=1 default)")
+	}
+	focus(t, s, "recursion_desired")
+	s.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	submitForm(t, s)
+	stored := fc.created.Config
+	want := map[string]any{"name": "dysv.de", "record_type": "SOA", "resolver": "ns1.dysv.de", "recursion_desired": false}
+	if got := jsonObject(t, stored); !reflect.DeepEqual(got, want) {
+		t.Fatalf("created config = %v, want %v", got, want)
+	}
+
+	fc = &formClient{}
+	scr, _ := newMonitorFormScreen(fc, "01DNS").Update(monitorFormLoadedMsg{monitor: ipc.MonitorResponse{
+		ID: "01DNS", Name: "ns1 DNS authoritative", Type: "dns",
+		Interval: ipc.Duration(time.Minute), Timeout: ipc.Duration(5 * time.Second), Config: stored,
+	}})
+	fs := scr.(*monitorFormScreen)
+	if fs.boolVal("recursion_desired") {
+		t.Fatal("edit form shows recursion desired on for an RD=0 monitor")
+	}
+	fs.setText("name", "ns1 SOA")
+	submitForm(t, fs)
+	if got := jsonObject(t, fc.updated.Config); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rename sent config %v, want the RD=0 config %v kept", got, want)
+	}
+
+	// Switching it back on returns the monitor to the default.
+	focus(t, fs, "recursion_desired")
+	fs.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	submitForm(t, fs)
+	if _, has := jsonObject(t, fc.updated.Config)["recursion_desired"]; has {
+		t.Errorf("config still has recursion_desired after switching it on: %s", fc.updated.Config)
 	}
 }
 
