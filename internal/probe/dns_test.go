@@ -59,6 +59,30 @@ func startDNSServer(t *testing.T, handler func(q dnsmessage.Question, overTCP bo
 func startDNSServerOn(t *testing.T, host string, handler func(q dnsmessage.Question, overTCP bool) dnsReply) *dnsTestServer {
 	t.Helper()
 	pc, ln := listenUDPAndTCP(t, host)
+	return serveDNS(t, pc, ln, handler)
+}
+
+// startDNSServerAt serves handler on the loopback "ip:port" addr until the
+// test ends, skipping the test when addr cannot be bound (127.0.0.2 is not
+// configured on every OS).
+func startDNSServerAt(t *testing.T, addr string, handler func(q dnsmessage.Question, overTCP bool) dnsReply) *dnsTestServer {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", addr)
+	if err != nil {
+		t.Skipf("cannot listen on udp %s: %v", addr, err)
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		_ = pc.Close()
+		t.Skipf("cannot listen on tcp %s: %v", addr, err)
+	}
+	return serveDNS(t, pc, ln, handler)
+}
+
+// serveDNS answers queries arriving on pc and ln with handler until the test
+// ends.
+func serveDNS(t *testing.T, pc net.PacketConn, ln net.Listener, handler func(q dnsmessage.Question, overTCP bool) dnsReply) *dnsTestServer {
+	t.Helper()
 	srv := &dnsTestServer{addr: pc.LocalAddr().String()}
 	var wg sync.WaitGroup
 	t.Cleanup(func() {
@@ -851,4 +875,255 @@ func TestDNSRunnerSystemResolverCancellation(t *testing.T) {
 		t.Errorf("second nameserver got %d queries after cancellation, want 0", n)
 	}
 	assertGoroutinesSettle(t, baseline)
+}
+
+// resolverHostName is the explicit resolver host name the multi-address
+// tests configure; lookups of it never leave the process.
+const resolverHostName = "ns1.dysv.de"
+
+// multiAddressResolver models a resolver host name with one address per
+// handler: the i-th handler serves 127.0.0.<i+1>, all on one port, as the
+// addresses of one resolver host share its port. A nil handler leaves its
+// address unbound, so queries to it are refused at once. It returns the
+// servers (nil where unbound), the resolver setting "ns1.dysv.de:<port>",
+// and a runner that resolves ns1.dysv.de to those addresses in order.
+func multiAddressResolver(t *testing.T, handlers ...func(dnsmessage.Question, bool) dnsReply) ([]*dnsTestServer, string, *DNSRunner) {
+	t.Helper()
+	hosts := make([]string, len(handlers))
+	servers := make([]*dnsTestServer, len(handlers))
+	var port string
+	for i, handler := range handlers {
+		hosts[i] = fmt.Sprintf("127.0.0.%d", i+1)
+		switch {
+		case handler == nil:
+		case port == "":
+			servers[i] = startDNSServerOn(t, hosts[i], handler)
+			_, port, _ = net.SplitHostPort(servers[i].addr)
+		default:
+			servers[i] = startDNSServerAt(t, net.JoinHostPort(hosts[i], port), handler)
+		}
+	}
+	r := runnerFor()
+	r.lookupHost = func(_ context.Context, host string) ([]string, error) {
+		if host != resolverHostName {
+			t.Errorf("looked up %q, want only %q", host, resolverHostName)
+			return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+		}
+		return hosts, nil
+	}
+	return servers, net.JoinHostPort(resolverHostName, port), r
+}
+
+// soaMonitor is the issue #3 monitor: the SOA of dysv.de from resolver.
+func soaMonitor(t *testing.T, resolver string, timeout time.Duration) monitor.Monitor {
+	return dnsMonitor(t, monitor.DNSMonitorConfig{Name: "dysv.de", RecordType: monitor.DNSRecordSOA, Resolver: resolver}, timeout)
+}
+
+// dysvSOA answers with the SOA record of dysv.de.
+var dysvSOA = answer(record("dysv.de.", &dnsmessage.SOAResource{
+	NS: dnsmessage.MustNewName("ns1.dysv.de."), MBox: dnsmessage.MustNewName("hostmaster.dysv.de."),
+	Serial: 2026091901, Refresh: 7200, Retry: 3600, Expire: 1209600, MinTTL: 3600,
+}))
+
+// dropAll never answers, like an address that silently drops DNS traffic.
+func dropAll(dnsmessage.Question, bool) dnsReply { return dnsReply{drop: true} }
+
+// TestDNSRunnerResolverHostSkipsSilentAddress is the case issue #3 reports:
+// the first address of the resolver host name silently drops DNS traffic.
+// It must only get its share of the timeout, so the second address is still
+// asked and the monitor stays up instead of failing on one bad address. The
+// details keep the configured host name and name the address that answered.
+func TestDNSRunnerResolverHostSkipsSilentAddress(t *testing.T) {
+	servers, resolver, r := multiAddressResolver(t, dropAll, dysvSOA)
+	const timeout = time.Second
+	baseline := runtime.NumGoroutine()
+
+	start := time.Now()
+	res, d := runDNS(t, context.Background(), r, soaMonitor(t, resolver, timeout))
+	elapsed := time.Since(start)
+
+	if !res.Success || d.Server != servers[1].addr {
+		t.Fatalf("result %+v details %+v, want success from the second address %s", res, d, servers[1].addr)
+	}
+	if d.Resolver != resolver {
+		t.Errorf("resolver = %q, want the configured host name %q", d.Resolver, resolver)
+	}
+	if n := servers[0].udpQueries.Load(); n != 1 {
+		t.Errorf("silent address got %d queries, want 1 (tried first)", n)
+	}
+	if elapsed >= timeout {
+		t.Errorf("check took %v, want it within the %v monitor timeout", elapsed, timeout)
+	}
+	assertGoroutinesSettle(t, baseline)
+}
+
+// TestDNSRunnerResolverHostSkipsRefusingAddress checks an address that fails
+// fast (nothing listening) moves on at once rather than waiting out its
+// share: the check succeeds from the next address long before the first
+// address's half of the timeout would have passed.
+func TestDNSRunnerResolverHostSkipsRefusingAddress(t *testing.T) {
+	servers, resolver, r := multiAddressResolver(t, nil, dysvSOA)
+	const timeout = 4 * time.Second
+
+	start := time.Now()
+	res, d := runDNS(t, context.Background(), r, soaMonitor(t, resolver, timeout))
+	elapsed := time.Since(start)
+
+	if !res.Success || d.Server != servers[1].addr {
+		t.Fatalf("result %+v details %+v, want success from the second address %s", res, d, servers[1].addr)
+	}
+	if elapsed >= timeout/2 {
+		t.Errorf("check took %v, want the refused address skipped at once", elapsed)
+	}
+}
+
+// TestDNSRunnerResolverHostAttemptsShareDeadline checks falling back across
+// addresses never extends the monitor timeout: with every address silent,
+// each is asked once and the check fails when the one deadline passes,
+// reporting the configured host name and the last address tried.
+func TestDNSRunnerResolverHostAttemptsShareDeadline(t *testing.T) {
+	servers, resolver, r := multiAddressResolver(t, dropAll, dropAll, dropAll)
+	const timeout = 600 * time.Millisecond
+	baseline := runtime.NumGoroutine()
+
+	start := time.Now()
+	res, d := runDNS(t, context.Background(), r, soaMonitor(t, resolver, timeout))
+	elapsed := time.Since(start)
+
+	if res.Success || res.Error != "dns query: timed out" {
+		t.Errorf("Success=%v Error=%q, want a timeout", res.Success, res.Error)
+	}
+	if d.Resolver != resolver || d.Server != servers[2].addr {
+		t.Errorf("resolver/server = %q/%q, want %q/%q", d.Resolver, d.Server, resolver, servers[2].addr)
+	}
+	for i, srv := range servers {
+		if n := srv.udpQueries.Load(); n != 1 {
+			t.Errorf("address %d got %d queries, want 1", i, n)
+		}
+	}
+	if elapsed < timeout-50*time.Millisecond || elapsed > timeout+250*time.Millisecond {
+		t.Errorf("check took %v, want the full %v monitor timeout and no more", elapsed, timeout)
+	}
+	assertGoroutinesSettle(t, baseline)
+}
+
+// TestDNSRunnerResolverHostTCPFallbackSharesAttemptBudget checks the TCP
+// retry after a truncated reply stays within that address's share and goes
+// to that same address: a hanging retry must not keep the next address from
+// being asked.
+func TestDNSRunnerResolverHostTCPFallbackSharesAttemptBudget(t *testing.T) {
+	servers, resolver, r := multiAddressResolver(t, func(_ dnsmessage.Question, overTCP bool) dnsReply {
+		if overTCP {
+			return dnsReply{delay: 700 * time.Millisecond}
+		}
+		return dnsReply{truncated: true}
+	}, dysvSOA)
+	const timeout = 800 * time.Millisecond
+
+	start := time.Now()
+	res, d := runDNS(t, context.Background(), r, soaMonitor(t, resolver, timeout))
+	elapsed := time.Since(start)
+
+	if !res.Success || d.Server != servers[1].addr {
+		t.Fatalf("result %+v details %+v, want success from the second address", res, d)
+	}
+	if n := servers[0].tcpQueries.Load(); n != 1 {
+		t.Errorf("first address got %d TCP queries, want its fallback tried once", n)
+	}
+	if n := servers[1].tcpQueries.Load(); n != 0 {
+		t.Errorf("second address got %d TCP queries, want the first's fallback kept to the first", n)
+	}
+	if elapsed >= timeout {
+		t.Errorf("check took %v, want it within the %v monitor timeout", elapsed, timeout)
+	}
+}
+
+// TestDNSRunnerResolverHostCancellation checks cancelling the check during
+// address fallback (service shutdown) ends it at once: the address being
+// asked is abandoned and the remaining ones are never tried.
+func TestDNSRunnerResolverHostCancellation(t *testing.T) {
+	servers, resolver, r := multiAddressResolver(t, nil, dropAll, dropAll)
+	baseline := runtime.NumGoroutine()
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	start := time.Now()
+	res, _ := runDNS(t, ctx, r, soaMonitor(t, resolver, 30*time.Second))
+	if elapsed := time.Since(start); res.Success || res.Error != "dns query: canceled" || elapsed > 2*time.Second {
+		t.Errorf("Success=%v Error=%q after %v, want %q promptly", res.Success, res.Error, elapsed, "dns query: canceled")
+	}
+	if n := servers[1].udpQueries.Load(); n != 1 {
+		t.Errorf("second address got %d queries, want 1 (asked when cancelled)", n)
+	}
+	if n := servers[2].udpQueries.Load(); n != 0 {
+		t.Errorf("third address got %d queries after cancellation, want 0", n)
+	}
+	assertGoroutinesSettle(t, baseline)
+}
+
+// TestDNSRunnerResolverHostLookup checks the resolver host name is looked up
+// as part of the check: a lookup failure is a failed check, and a hanging
+// lookup is bounded by the monitor timeout and ended by cancellation.
+func TestDNSRunnerResolverHostLookup(t *testing.T) {
+	r := runnerFor()
+	r.lookupHost = func(_ context.Context, host string) ([]string, error) {
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+	}
+	res, d := runDNS(t, context.Background(), r, soaMonitor(t, "ns1.dysv.de", time.Second))
+	if res.Success || res.Error != "dns query: host lookup failed: no such host" {
+		t.Errorf("not found: Success=%v Error=%q, want a host lookup failure", res.Success, res.Error)
+	}
+	if d.Resolver != "ns1.dysv.de:53" || d.Server != "" {
+		t.Errorf("not found: resolver/server = %q/%q, want ns1.dysv.de:53 and no server", d.Resolver, d.Server)
+	}
+
+	r.lookupHost = func(ctx context.Context, _ string) ([]string, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(5 * time.Second):
+			return nil, errors.New("lookup outlived the check context")
+		}
+	}
+	start := time.Now()
+	res, _ = runDNS(t, context.Background(), r, soaMonitor(t, "ns1.dysv.de", 200*time.Millisecond))
+	if elapsed := time.Since(start); res.Success || res.Error != "dns query: timed out" || elapsed > time.Second {
+		t.Errorf("hanging lookup: Success=%v Error=%q after %v, want a timeout near 200ms", res.Success, res.Error, elapsed)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	start = time.Now()
+	res, _ = runDNS(t, ctx, r, soaMonitor(t, "ns1.dysv.de", 30*time.Second))
+	if elapsed := time.Since(start); res.Success || res.Error != "dns query: canceled" || elapsed > 2*time.Second {
+		t.Errorf("cancelled lookup: Success=%v Error=%q after %v, want %q promptly", res.Success, res.Error, elapsed, "dns query: canceled")
+	}
+}
+
+// TestDNSRunnerLiteralResolverSkipsLookup checks an IPv4 or IPv6 literal
+// resolver keeps the single-address behaviour: no host lookup, and the one
+// address gets the whole monitor timeout.
+func TestDNSRunnerLiteralResolverSkipsLookup(t *testing.T) {
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		t.Run(host, func(t *testing.T) {
+			srv := startDNSServerOn(t, host, dropAll)
+			r := runnerFor()
+			r.lookupHost = func(_ context.Context, name string) ([]string, error) {
+				t.Errorf("looked up %q, want no lookup for a literal resolver", name)
+				return nil, errors.New("unexpected lookup")
+			}
+			const timeout = 200 * time.Millisecond
+
+			start := time.Now()
+			res, d := runDNS(t, context.Background(), r, soaMonitor(t, srv.addr, timeout))
+			elapsed := time.Since(start)
+
+			if res.Success || res.Error != "dns query: timed out" || d.Server != srv.addr || d.Resolver != srv.addr {
+				t.Errorf("result %+v details %+v, want a timeout from %s", res, d, srv.addr)
+			}
+			if elapsed < timeout-10*time.Millisecond {
+				t.Errorf("gave up after %v; a literal resolver must get the whole %v", elapsed, timeout)
+			}
+		})
+	}
 }
