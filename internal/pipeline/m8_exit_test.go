@@ -119,9 +119,13 @@ func TestM8ExitCheck(t *testing.T) {
 	//
 	// For each range we assert the bucket count equals duration/resolution,
 	// that bucket spans are exactly the resolution, and that at least one
-	// bucket reflects observed activity (state != unknown). The samples were
-	// written "now", so they always land in the last bucket of every range.
-	now := time.Now().UTC()
+	// bucket reflects observed activity (state != unknown). Buckets are
+	// half-open, [Start, End), and the window ends at now. On a fast machine
+	// every check above and this clock reading share one millisecond, and a
+	// sample stamped exactly at now would miss the window, so the query is
+	// anchored 1ms later. The samples then always land in the last bucket of
+	// every range.
+	now := time.Now().UTC().Add(time.Millisecond)
 	for _, rg := range tsdb.SupportedRanges() {
 		duration, ok := tsdb.DurationFor(rg)
 		if !ok {
