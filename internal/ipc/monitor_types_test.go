@@ -84,14 +84,14 @@ func sameJSON(t *testing.T, a, b []byte) bool {
 
 // TestTCPAndDNSMonitorsOverIPC walks the operator scenario from the v0.2.0
 // brief through the /v1 API: an SSH port monitor and an authoritative SOA
-// monitor for one name server are created, read back with their configs
-// intact, edited, and deleted.
+// monitor for one name server (sent without recursion desired) are created,
+// read back with their configs intact, edited, and deleted.
 func TestTCPAndDNSMonitorsOverIPC(t *testing.T) {
 	client, _, _ := startMonitorAPI(t)
 	ctx := context.Background()
 
 	tcpCfg := json.RawMessage(`{"host":"ns1.dysv.de","port":22}`)
-	dnsCfg := json.RawMessage(`{"name":"dysv.de","record_type":"SOA","resolver":"ns1.dysv.de",` +
+	dnsCfg := json.RawMessage(`{"name":"dysv.de","record_type":"SOA","resolver":"ns1.dysv.de","recursion_desired":false,` +
 		`"expected_value":{"condition":"starts_with","value":"ns1.dysv.de. "}}`)
 
 	tcpMon, err := client.CreateMonitor(ctx, ipc.CreateMonitorRequest{
@@ -126,8 +126,9 @@ func TestTCPAndDNSMonitorsOverIPC(t *testing.T) {
 		t.Fatalf("list = %d monitors, %v; want 2", len(list), err)
 	}
 
-	// Pointing the monitor at ns2 and dropping the expected value must not
-	// leave the old expected value behind.
+	// Pointing the monitor at ns2 and dropping the expected value and the
+	// RD=0 setting must leave neither behind: without the key the monitor is
+	// back to the RD=1 default.
 	edited := json.RawMessage(`{"name":"dysv.de","record_type":"SOA","resolver":"ns2.dysv.de"}`)
 	if _, err := client.UpdateMonitor(ctx, dnsMon.ID, ipc.UpdateMonitorRequest{Config: edited}); err != nil {
 		t.Fatalf("update dns monitor: %v", err)
@@ -164,6 +165,7 @@ func TestTCPAndDNSValidationErrorsOverIPC(t *testing.T) {
 		{"dns bad resolver", "dns", `{"name":"dysv.de","record_type":"SOA","resolver":"ns1.dysv.de:dns"}`, "resolver"},
 		{"dns bad condition", "dns", `{"name":"dysv.de","record_type":"A","expected_value":{"condition":"matches","value":"x"}}`, "expected_value.condition"},
 		{"dns empty expected value", "dns", `{"name":"dysv.de","record_type":"A","expected_value":{"condition":"equals","value":""}}`, "expected_value.value"},
+		{"dns recursion_desired not a boolean", "dns", `{"name":"dysv.de","record_type":"SOA","recursion_desired":"false"}`, "config"},
 		{"config wrong shape", "tcp", `{"host":"ns1.dysv.de","port":"22"}`, "config"},
 		// No runner can execute ping yet, so the API refuses it outright.
 		{"ping not available", "ping", `{"host":"192.0.2.1"}`, "type"},

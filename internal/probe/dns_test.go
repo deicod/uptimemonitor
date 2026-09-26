@@ -46,6 +46,10 @@ type dnsTestServer struct {
 	addr       string
 	udpQueries atomic.Int32
 	tcpQueries atomic.Int32
+	// udpRD and tcpRD hold the RD (recursion desired) bit of the latest
+	// query received over each transport.
+	udpRD atomic.Bool
+	tcpRD atomic.Bool
 }
 
 // startDNSServer serves handler on 127.0.0.1 until the test ends.
@@ -98,20 +102,21 @@ func serveDNS(t *testing.T, pc net.PacketConn, ln net.Listener, handler func(q d
 			if err != nil {
 				return
 			}
-			id, q, ok := parseQuery(buf[:n])
+			h, q, ok := parseQuery(buf[:n])
 			if !ok {
 				continue
 			}
 			srv.udpQueries.Add(1)
+			srv.udpRD.Store(h.RecursionDesired)
 			reply := handler(q, false)
 			if reply.drop {
 				continue
 			}
 			time.Sleep(reply.delay)
 			if reply.preface != nil {
-				_, _ = pc.WriteTo(reply.preface(id), from)
+				_, _ = pc.WriteTo(reply.preface(h.ID), from)
 			}
-			_, _ = pc.WriteTo(buildReply(t, id, q, reply, false), from)
+			_, _ = pc.WriteTo(buildReply(t, h.ID, q, reply, false), from)
 		}
 	})
 	wg.Go(func() {
@@ -130,17 +135,18 @@ func serveDNS(t *testing.T, pc net.PacketConn, ln net.Listener, handler func(q d
 				if _, err := io.ReadFull(conn, msg); err != nil {
 					return
 				}
-				id, q, ok := parseQuery(msg)
+				h, q, ok := parseQuery(msg)
 				if !ok {
 					return
 				}
 				srv.tcpQueries.Add(1)
+				srv.tcpRD.Store(h.RecursionDesired)
 				reply := handler(q, true)
 				if reply.drop {
 					return
 				}
 				time.Sleep(reply.delay)
-				out := buildReply(t, id, q, reply, true)
+				out := buildReply(t, h.ID, q, reply, true)
 				_, _ = conn.Write(append(binary.BigEndian.AppendUint16(nil, uint16(len(out))), out...))
 			})
 		}
@@ -167,18 +173,18 @@ func listenUDPAndTCP(t *testing.T, host string) (net.PacketConn, net.Listener) {
 	return nil, nil
 }
 
-// parseQuery extracts the ID and question of a query message.
-func parseQuery(b []byte) (uint16, dnsmessage.Question, bool) {
+// parseQuery extracts the header and question of a query message.
+func parseQuery(b []byte) (dnsmessage.Header, dnsmessage.Question, bool) {
 	var p dnsmessage.Parser
 	h, err := p.Start(b)
 	if err != nil || h.Response {
-		return 0, dnsmessage.Question{}, false
+		return dnsmessage.Header{}, dnsmessage.Question{}, false
 	}
 	q, err := p.Question()
 	if err != nil {
-		return 0, dnsmessage.Question{}, false
+		return dnsmessage.Header{}, dnsmessage.Question{}, false
 	}
-	return h.ID, q, true
+	return h, q, true
 }
 
 // buildReply packs reply as the answer to query id/q.
@@ -581,6 +587,51 @@ func TestDNSRunnerTCPFallbackSharesDeadline(t *testing.T) {
 	// A fresh timeout for the TCP leg would end at ~650ms (250ms UDP + 400ms).
 	if elapsed > 600*time.Millisecond {
 		t.Errorf("check took %v, want it bounded by the 400ms monitor timeout", elapsed)
+	}
+}
+
+// TestDNSRunnerRecursionDesired pins the RD bit on the wire. Monitors saved
+// before recursion_desired existed have no such key and must keep sending
+// RD=1. An explicit false asks an authoritative server for its own data
+// without requesting recursion, and the TCP retry after a truncated reply
+// must not quietly turn recursion back on. Details record the bit sent even
+// when the check fails, since that is when an operator needs to know it.
+func TestDNSRunnerRecursionDesired(t *testing.T) {
+	soa := record("dysv.de.", &dnsmessage.SOAResource{
+		NS: dnsmessage.MustNewName("ns1.dysv.de."), MBox: dnsmessage.MustNewName("hostmaster.dysv.de."),
+		Serial: 2026091901, Refresh: 7200, Retry: 3600, Expire: 1209600, MinTTL: 3600,
+	})
+	for _, tc := range []struct {
+		name    string
+		setting *bool
+		reply   dnsReply
+		wantRD  bool
+	}{
+		{"absent defaults to RD=1", nil, dnsReply{answers: []dnsmessage.Resource{soa}}, true},
+		{"true", new(true), dnsReply{answers: []dnsmessage.Resource{soa}}, true},
+		{"false", new(false), dnsReply{answers: []dnsmessage.Resource{soa}}, false},
+		{"absent over TCP fallback", nil, dnsReply{truncated: true, answers: []dnsmessage.Resource{soa}}, true},
+		{"false over TCP fallback", new(false), dnsReply{truncated: true, answers: []dnsmessage.Resource{soa}}, false},
+		{"false on a failed check", new(false), dnsReply{rcode: dnsmessage.RCodeRefused}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := startDNSServer(t, func(dnsmessage.Question, bool) dnsReply { return tc.reply })
+			res, d := runDNS(t, context.Background(), runnerFor(), dnsMonitor(t, monitor.DNSMonitorConfig{
+				Name: "dysv.de", RecordType: monitor.DNSRecordSOA, Resolver: srv.addr, RecursionDesired: tc.setting,
+			}, 2*time.Second))
+			if wantSuccess := tc.reply.rcode == dnsmessage.RCodeSuccess; res.Success != wantSuccess {
+				t.Errorf("Success=%v Error=%q, want %v", res.Success, res.Error, wantSuccess)
+			}
+			if srv.udpQueries.Load() != 1 || srv.udpRD.Load() != tc.wantRD {
+				t.Errorf("UDP: %d queries, RD=%v; want 1 query with RD=%v", srv.udpQueries.Load(), srv.udpRD.Load(), tc.wantRD)
+			}
+			if tc.reply.truncated && (srv.tcpQueries.Load() != 1 || srv.tcpRD.Load() != tc.wantRD) {
+				t.Errorf("TCP fallback: %d queries, RD=%v; want 1 query with RD=%v", srv.tcpQueries.Load(), srv.tcpRD.Load(), tc.wantRD)
+			}
+			if d.RecursionDesired != tc.wantRD {
+				t.Errorf("details recursion_desired = %v, want %v", d.RecursionDesired, tc.wantRD)
+			}
+		})
 	}
 }
 

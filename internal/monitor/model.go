@@ -120,12 +120,14 @@ type ICMPPingMonitorConfig struct {
 // DNSMonitorConfig is the type-specific configuration for a DNS monitor
 // (SPEC §11.2.4). An empty Resolver selects the system resolver; otherwise it
 // is a host or IP address with an optional port (default 53), see
-// ResolverAddress.
+// ResolverAddress. RecursionDesired sets the query's RD bit; nil means true,
+// so monitors saved before the setting existed keep requesting recursion.
 type DNSMonitorConfig struct {
-	Name          string            `json:"name"`
-	RecordType    DNSRecordType     `json:"record_type"`
-	Resolver      string            `json:"resolver,omitempty"`
-	ExpectedValue *DNSExpectedValue `json:"expected_value,omitempty"`
+	Name             string            `json:"name"`
+	RecordType       DNSRecordType     `json:"record_type"`
+	Resolver         string            `json:"resolver,omitempty"`
+	RecursionDesired *bool             `json:"recursion_desired,omitempty"`
+	ExpectedValue    *DNSExpectedValue `json:"expected_value,omitempty"`
 }
 
 // DNSRecordType is the DNS record class queried by a DNS monitor.

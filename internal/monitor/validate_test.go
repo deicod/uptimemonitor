@@ -85,6 +85,12 @@ func TestValidateMonitor(t *testing.T) {
 			m.Type = MonitorTypeDNS
 			m.Config = mustJSON(DNSMonitorConfig{Name: "", RecordType: DNSRecordA})
 		}, "config.name"},
+		// A quoted "false" must be refused, not read as an absent setting:
+		// that would silently keep sending RD=1 to a monitor meant to send 0.
+		{"dns recursion_desired must be a JSON boolean", func(m *Monitor) {
+			m.Type = MonitorTypeDNS
+			m.Config = json.RawMessage(`{"name":"example.com","record_type":"A","recursion_desired":"false"}`)
+		}, "config"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -334,6 +340,10 @@ func TestValidateDNSConfig(t *testing.T) {
 		{"resolver port not numeric", func(c *DNSMonitorConfig) { c.Resolver = "1.1.1.1:dns" }, "resolver"},
 		{"resolver port zero", func(c *DNSMonitorConfig) { c.Resolver = "1.1.1.1:0" }, "resolver"},
 		{"resolver port too high", func(c *DNSMonitorConfig) { c.Resolver = "1.1.1.1:70000" }, "resolver"},
+		// Both RD values are valid with any resolver. RD=0 against the system
+		// resolver is unusual, but it is the operator's call, not an error.
+		{"recursion desired true accepted", func(c *DNSMonitorConfig) { c.RecursionDesired = new(true) }, ""},
+		{"recursion desired false accepted", func(c *DNSMonitorConfig) { c.RecursionDesired = new(false) }, ""},
 		{"expected value empty", func(c *DNSMonitorConfig) {
 			c.ExpectedValue = &DNSExpectedValue{Condition: DNSCondEquals, Value: ""}
 		}, "expected_value.value"},

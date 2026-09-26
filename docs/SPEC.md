@@ -856,10 +856,11 @@ Validation:
 
 ```go
 type DNSMonitorConfig struct {
-    Name          string            `json:"name"`        // FQDN
-    RecordType    DNSRecordType     `json:"record_type"` // A | AAAA | CNAME | MX | TXT | NS | SOA
-    Resolver      string            `json:"resolver,omitempty"` // optional host[:port]; empty = system resolver
-    ExpectedValue *DNSExpectedValue `json:"expected_value,omitempty"`
+    Name             string            `json:"name"`                        // FQDN
+    RecordType       DNSRecordType     `json:"record_type"`                 // A | AAAA | CNAME | MX | TXT | NS | SOA
+    Resolver         string            `json:"resolver,omitempty"`          // optional host[:port]; empty = system resolver
+    RecursionDesired *bool             `json:"recursion_desired,omitempty"` // RD bit of the query; nil = true
+    ExpectedValue    *DNSExpectedValue `json:"expected_value,omitempty"`
 }
 
 type DNSRecordType string
@@ -907,6 +908,10 @@ Validation:
   bracketed form, e.g. `[2001:db8::53]:53`); port in `[1, 65535]`, default
   `53`. `monitor.ResolverAddress` normalises it to the `host:port` the runner
   queries.
+- `RecursionDesired`: optional JSON boolean, accepted with any resolver.
+  Absent or `null` means `true`, which is how monitors created before the
+  field existed behave. A non-boolean value (e.g. the string `"false"`)
+  fails decoding with `field: "config"` rather than being read as absent.
 - `ExpectedValue.Condition`: one of the eight conditions below.
 - `ExpectedValue.Value`: non-empty when `ExpectedValue` is set.
 
@@ -1477,19 +1482,22 @@ Behavior:
   the ones after it; the last attempt — and so a resolver with a single
   address — gets all that is left. `search`/`ndots` never apply — the configured name is queried as
   an absolute name.
-- Issues one query for `Name` of `RecordType`, class IN, with recursion
-  desired and an EDNS(0) record advertising a 1232-byte UDP payload. The
-  query goes over UDP; a truncated (TC) reply is repeated over TCP to the
-  same server address. All legs share the single per-monitor deadline —
-  the TCP retry does not restart the timeout — and cancellation of the check
-  context interrupts any blocked read.
+- Issues one query for `Name` of `RecordType`, class IN, with the RD
+  (recursion desired) bit set from `RecursionDesired` (default on) and an
+  EDNS(0) record advertising a 1232-byte UDP payload. The query goes over
+  UDP; a truncated (TC) reply is repeated over TCP to the same server
+  address with the identical message, so the retry carries the same RD bit.
+  The reply's RA (recursion available) bit does not affect classification.
+  All legs share the single per-monitor deadline — the TCP retry does not
+  restart the timeout — and cancellation of the check context interrupts any
+  blocked read.
 - UDP datagrams that are not a reply to the query (wrong ID or a different
   question) are ignored, as the Go resolver does. A reply with the right ID
   that does not parse fails the check as a malformed response.
 - Records resolver (`"system"` or the normalised `host:port`), the
-  `ip:port` queried, the rcode mnemonic (`NOERROR`, `NXDOMAIN`, `SERVFAIL`,
-  `REFUSED`, …), the answer count, and the first up-to-10 record values in
-  `DNSDetails`.
+  `ip:port` queried, the RD bit sent, the rcode mnemonic (`NOERROR`,
+  `NXDOMAIN`, `SERVFAIL`, `REFUSED`, …), the answer count, and the first
+  up-to-10 record values in `DNSDetails`.
 - Classifies success as: a reply within the timeout, rcode `NOERROR`, at
   least one answer record of the requested type (other answer types, such as
   a CNAME chain in front of an A answer, do not count), and (when configured)
@@ -1552,13 +1560,14 @@ type ICMPPingDetails struct {
 
 // monitor.MonitorTypeDNS -> DNSDetails
 type DNSDetails struct {
-    Name        string   `json:"name"`             // query name as configured
-    RecordType  string   `json:"record_type"`      // A, AAAA, ..., SOA
-    Resolver    string   `json:"resolver"`         // "system" or the normalised "host:port"
-    Server      string   `json:"server,omitempty"` // ip:port queried last; absent if none could be dialled
-    RCode       string   `json:"rcode,omitempty"`  // NOERROR, NXDOMAIN, ...; absent when no reply arrived
-    AnswerCount int      `json:"answer_count"`     // answers of RecordType, uncapped
-    Records     []string `json:"records,omitempty"` // first up-to-10, zone-file form
+    Name             string   `json:"name"`              // query name as configured
+    RecordType       string   `json:"record_type"`       // A, AAAA, ..., SOA
+    Resolver         string   `json:"resolver"`          // "system" or the normalised "host:port"
+    Server           string   `json:"server,omitempty"`  // ip:port queried last; absent if none could be dialled
+    RecursionDesired bool     `json:"recursion_desired"` // RD bit the query carried; absent in rows recorded before the setting existed
+    RCode            string   `json:"rcode,omitempty"`   // NOERROR, NXDOMAIN, ...; absent when no reply arrived
+    AnswerCount      int      `json:"answer_count"`      // answers of RecordType, uncapped
+    Records          []string `json:"records,omitempty"` // first up-to-10, zone-file form
 }
 ```
 
