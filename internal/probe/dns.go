@@ -34,12 +34,20 @@ type DNSRunner struct {
 	// monitor has no explicit resolver. Tests replace it to reach a local
 	// server.
 	systemServers func() []string
+	// lookupHost resolves the host name of an explicit resolver to its
+	// addresses, in the order they are tried. Tests replace it so resolver
+	// host names never reach real DNS.
+	lookupHost func(ctx context.Context, host string) ([]string, error)
 }
 
 // NewDNSRunner returns a DNSRunner whose system resolver is the nameserver
-// list in /etc/resolv.conf.
+// list in /etc/resolv.conf and which resolves explicit resolver host names
+// with the default net.Resolver.
 func NewDNSRunner() *DNSRunner {
-	return &DNSRunner{systemServers: func() []string { return readResolvConf(resolvConfPath) }}
+	return &DNSRunner{
+		systemServers: func() []string { return readResolvConf(resolvConfPath) },
+		lookupHost:    net.DefaultResolver.LookupHost,
+	}
 }
 
 // Type reports that this runner handles DNS monitors.
@@ -99,23 +107,23 @@ func (r *DNSRunner) Run(ctx context.Context, m monitor.Monitor) (Result, error) 
 	}
 
 	details := DNSDetails{Name: cfg.Name, RecordType: string(cfg.RecordType), Resolver: "system"}
-	var servers []string
+	var resolverHost, resolverPort string
 	if cfg.Resolver != "" {
 		addr, err := monitor.ResolverAddress(cfg.Resolver)
+		if err == nil {
+			resolverHost, resolverPort, err = net.SplitHostPort(addr)
+		}
 		if err != nil {
 			return Result{}, fmt.Errorf("dns monitor: resolver: %w", err)
 		}
 		details.Resolver = addr
-		servers = []string{addr}
-	} else {
-		servers = r.systemServers()
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, m.Timeout)
 	defer cancel()
 
 	started := time.Now()
-	resp, server, err := queryServers(runCtx, servers, id, q, query)
+	resp, server, err := r.query(runCtx, resolverHost, resolverPort, id, q, query)
 	finished := time.Now()
 	res := Result{
 		StartedAt:  started,
@@ -180,15 +188,40 @@ func buildQuery(id uint16, q dnsmessage.Question) ([]byte, error) {
 	return b.Finish()
 }
 
+// query sends the query to the system nameservers when host is empty, and
+// otherwise to the explicit resolver host on port. An IP literal is the only
+// server queried. A host name is resolved under ctx, so the lookup counts
+// against the monitor timeout and stops when the check is cancelled, and
+// every address it resolves to is tried in turn by queryServers, so one
+// silent address cannot starve the others.
+func (r *DNSRunner) query(ctx context.Context, host, port string, id uint16, q dnsmessage.Question, query []byte) (dnsmessage.Message, string, error) {
+	var servers []string
+	switch {
+	case host == "":
+		servers = r.systemServers()
+	case net.ParseIP(host) != nil:
+		servers = []string{net.JoinHostPort(host, port)}
+	default:
+		ips, err := r.lookupHost(ctx, host)
+		if err != nil {
+			return dnsmessage.Message{}, "", err
+		}
+		for _, ip := range ips {
+			servers = append(servers, net.JoinHostPort(ip, port))
+		}
+	}
+	return queryServers(ctx, servers, id, q, query)
+}
+
 // queryServers sends the query to each server in turn until one replies. A
 // reply with any response code ends the search. Each attempt gets an equal
 // share of the time left before ctx's deadline — remaining time divided by
 // the servers still to try — so a silent nameserver cannot use up the budget
-// of those after it; the last attempt, and so the only attempt for an
-// explicit resolver, gets all that is left. Shares are derived from ctx, so
-// they never extend the monitor deadline and cancelling ctx ends any attempt
-// at once. It returns the reply, the "ip:port" last queried, and the last
-// error when no server replied.
+// of those after it; the last attempt, and so the only attempt for a
+// resolver with a single address, gets all that is left. Shares are derived
+// from ctx, so they never extend the monitor deadline and cancelling ctx ends
+// any attempt at once. It returns the reply, the "ip:port" last queried, and
+// the last error when no server replied.
 func queryServers(ctx context.Context, servers []string, id uint16, q dnsmessage.Question, query []byte) (dnsmessage.Message, string, error) {
 	if len(servers) == 0 {
 		return dnsmessage.Message{}, "", errNoNameservers

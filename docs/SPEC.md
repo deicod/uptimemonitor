@@ -1465,14 +1465,17 @@ Behavior:
   exposes neither the response code nor SOA lookups, and hides which server
   answered.
 - Server selection: when `DNSMonitorConfig.Resolver` is set, the query goes
-  to its normalised address (§11.2.4); a host name there is resolved with the
-  system resolver. Otherwise the runner queries the system resolver: the
-  `nameserver` entries of `/etc/resolv.conf`, tried in order until one
+  to its normalised address (§11.2.4). An IP literal is the only server
+  asked. A host name is resolved with the system resolver as part of the
+  check (within the monitor timeout, interrupted by cancellation), and each
+  of its IPv4/IPv6 addresses is tried in lookup order, on the configured
+  port, until one replies. Otherwise the runner queries the system resolver:
+  the `nameserver` entries of `/etc/resolv.conf`, tried in order until one
   replies (falling back to `127.0.0.1:53` and `[::1]:53` like the Go
-  resolver). Each attempt gets an equal share of the time left (remaining
-  time ÷ nameservers still to try), so a silent nameserver cannot starve the
-  ones after it; the last attempt — and so a lone explicit resolver — gets
-  all that is left. `search`/`ndots` never apply — the configured name is queried as
+  resolver). Either way each attempt gets an equal share of the time left
+  (remaining time ÷ servers still to try), so a silent server cannot starve
+  the ones after it; the last attempt — and so a resolver with a single
+  address — gets all that is left. `search`/`ndots` never apply — the configured name is queried as
   an absolute name.
 - Issues one query for `Name` of `RecordType`, class IN, with recursion
   desired and an EDNS(0) record advertising a 1232-byte UDP payload. The

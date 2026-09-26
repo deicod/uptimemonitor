@@ -114,7 +114,9 @@ DNS details:
   remaining timeout so one silent nameserver cannot starve the next).
   Otherwise give a host name or IP
   address, optionally with a port (`ns1.example.com`, `192.0.2.53:5353`,
-  `[2001:db8::53]:53`); the default port is 53. Queries use UDP and retry over
+  `[2001:db8::53]:53`); the default port is 53. A host name that resolves to
+  several addresses has them tried in turn, sharing the timeout the same way.
+  Queries use UDP and retry over
   TCP when the answer is truncated, all within the monitor timeout.
 - **Record values** are matched in their zone-file text form: `192.0.2.1`,
   `2001:db8::1`, `target.example.com.` (CNAME/NS keep the trailing dot),
