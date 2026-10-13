@@ -4,18 +4,18 @@ go 1.26.3
 
 require (
 	charm.land/bubbles/v2 v2.2.1
-	charm.land/bubbletea/v2 v2.0.9
+	charm.land/bubbletea/v2 v2.0.10
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/oklog/ulid/v2 v2.1.2
-	github.com/prometheus/common v0.71.0
-	github.com/prometheus/prometheus v0.314.0
+	github.com/prometheus/common v0.72.0
+	github.com/prometheus/prometheus v0.315.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/net v0.59.0
-	modernc.org/sqlite v1.59.0
+	modernc.org/sqlite v1.60.1
 )
 
 require (
@@ -118,7 +118,7 @@ require (
 	k8s.io/client-go v0.37.0 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3 // indirect
-	modernc.org/libc v1.77.0 // indirect
+	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
